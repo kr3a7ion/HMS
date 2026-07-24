@@ -1,61 +1,138 @@
-**Add your own guidelines here**
-<!--
+# Nexura — Engineering & Design Guidelines
 
-System Guidelines
+Nexura is an offline-first hospitality management platform. Every device at a
+property talks to a **local server on the hotel LAN**; that local server syncs
+opportunistically to a shared central server. Nothing about the product may
+assume the internet is present. Keep that constraint in mind for every
+decision below, not just the ones that say so explicitly.
 
-Use this file to provide the AI with rules and guidelines you want it to follow.
-This template outlines a few examples of things you can add. You can add your own sections and format it to suit your needs
+Full product spec: `src/imports/Nexura_Complete_Master_Blueprint.md` and
+`src/imports/Nexura_Auth_and_Distribution_Architecture.md`. Those two documents
+are the source of truth for screen behavior, roles, and the auth/sync
+architecture. This file is the source of truth for *how to write the code*
+that implements them. See `ROADMAP.md` at the repo root for current build
+sequence and status.
 
-TIP: More context isn't always better. It can confuse the LLM. Try and add the most important rules you need
+---
 
-# General guidelines
+## 1. Current state of this repo (read this first)
 
-Any general rules you want the AI to follow.
-For example:
+This codebase is a **click-through UI prototype** — Vite + React + Tailwind +
+shadcn/ui, originally generated via Figma Make. Every screen renders from
+in-memory mock state in `src/app/data.tsx`; there is no backend, no
+persistence, no real auth, and no network calls anywhere in `src/`. Treat the
+existing screens as an accurate design spec to build against, not as
+production code to extend indefinitely. As real backend work lands (per
+`ROADMAP.md`), mock state in a screen should be replaced by real API calls to
+the local server, not layered on top of.
 
-* Only use absolute positioning when necessary. Opt for responsive and well structured layouts that use flexbox and grid by default
-* Refactor code as you go to keep code clean
-* Keep file sizes small and put helper functions and components in their own files.
+## 2. General coding guidelines
 
---------------
+- Only use absolute positioning when necessary. Prefer flexbox/grid,
+  responsive by default — devices range from front-desk desktops to
+  housekeeping tablets.
+- Keep files small. `Screens.tsx` is already 3,000+ lines because every
+  screen was added to one file — **do not keep adding to it**. New screens go
+  in their own file under `src/app/screens/<module>/<ScreenName>.tsx` grouped
+  by blueprint module (front-desk, housekeeping, maintenance, etc.).
+- Refactor as you go. If you touch a screen that's still using inline hex
+  values instead of the token exports in `data.tsx`, fix it while you're
+  there.
+- No feature flags or backwards-compatibility shims for a prototype with no
+  external consumers yet. Change code directly.
+- Every list/table/widget needs three states before it's done: **Loading**
+  (skeleton), **Empty** (icon + one-line message + CTA), **Offline/Error**
+  (amber banner, non-blocking). This is a hard requirement per Blueprint Part
+  3.1, not a nice-to-have — offline is the default operating condition for
+  this product, not an edge case.
 
-# Design system guidelines
-Rules for how the AI should make generations look like your company's design system
+## 3. Architecture guidelines
 
-Additionally, if you select a design system to use in the prompt box, you can reference
-your design system's components, tokens, variables and components.
-For example:
+- **The browser never talks to a third-party API directly** — not TTLock, not
+  payment processors, not WhatsApp/SMS. All of that is proxied through the
+  local server (Blueprint Part 6.1). If you're adding a screen that needs
+  external data, assume a local-server endpoint stands between it and the
+  internet.
+- **Auth tokens are two separate authorities** — local-server-signed JWTs for
+  branch sessions, central-server-signed JWTs for the Platform Admin Console
+  and Organization Portal. Never assume a token from one context is valid in
+  another (Auth doc Part 1.3, Part 2).
+- **Role gating is enforced in three layers**, not just the UI: navigation
+  (don't render it), API (reject it), and DB row-level filtering (Auth doc
+  9.3). When building the backend, don't rely on the sidebar hiding a menu
+  item as the only protection for that screen.
+- Anything that requires internet (TTLock issue/revoke, WhatsApp/SMS,
+  central sync) must degrade gracefully to a queued/pending state, never a
+  blocking error. Model this explicitly in state (`pending_sync`, `failed`,
+  `queued`) rather than a boolean `isOnline` check scattered through
+  components.
 
-* Use a base font-size of 14px
-* Date formats should always be in the format “Jun 10”
-* The bottom toolbar should only ever have a maximum of 4 items
-* Never use the floating action button with the bottom toolbar
-* Chips should always come in sets of 3 or more
-* Don't use a dropdown if there are 2 or fewer options
+## 4. Design system
 
-You can also create sub sections and add more specific details
-For example:
+Design tokens already live as exports in `src/app/data.tsx` — colors, and the
+`mono`/`sans` font stacks. **Import them; do not restate hex values inline.**
+If a screen needs a color not yet exported, add it to `data.tsx` rather than
+hardcoding it locally.
 
+| Token | Value | Usage |
+|---|---|---|
+| `PRIMARY` | `#123A73` | Brand color, primary buttons, active accents |
+| `NAV_BG` | `#0F2044` | Header bar, sidebar |
+| `TEAL` | `#1BA39C` | Secondary actions, links, sync indicators |
+| `ORANGE` | `#F57C00` | Occupied status, critical callouts |
+| `SUCCESS` | `#2E7D32` | Available status, sync confirmed |
+| `WARNING` | `#FFA000` | Cleaning status, pending sync |
+| `ERROR` | `#D32F2F` | Maintenance/fault, destructive actions |
+| `BORDER` | `#E2E8F0` | Card borders, dividers |
+| `TEXT` / `MUTED` / `SUBTLE` | `#0F172A` / `#64748B` / `#94A3B8` | Text hierarchy |
 
-## Button
-The Button component is a fundamental interactive element in our design system, designed to trigger actions or navigate
-users through the application. It provides visual feedback and clear affordances to enhance user experience.
+Status-specific color maps (`resStC`, `hkC`, `woC`, `priC` in `data.tsx`)
+follow the same pattern — extend these objects for new statuses rather than
+writing new `bg`/`text` pairs inline.
 
-### Usage
-Buttons should be used for important actions that users need to take, such as form submissions, confirming choices,
-or initiating processes. They communicate interactivity and should have clear, action-oriented labels.
+- **Typography:** Inter for UI text, JetBrains Mono (`mono` export) for
+  anything tabular or identity-bearing — clocks, IDs, invoice numbers, PIN
+  codes, money amounts in tables. This distinction is part of the product's
+  visual language, not a style preference — keep it consistent.
+- **Spacing:** 8px base grid. Card radius 12px standard, 8px for compact
+  chips/cells. Minimum interactive target 44px height.
+- **Status badges** always use the color-coded conventions in Blueprint Part
+  3.3 — never invent a new color for a status that already has a defined one.
 
-### Variants
-* Primary Button
-  * Purpose : Used for the main action in a section or page
-  * Visual Style : Bold, filled with the primary brand color
-  * Usage : One primary button per section to guide users toward the most important action
-* Secondary Button
-  * Purpose : Used for alternative or supporting actions
-  * Visual Style : Outlined with the primary color, transparent background
-  * Usage : Can appear alongside a primary button for less important actions
-* Tertiary Button
-  * Purpose : Used for the least important actions
-  * Visual Style : Text-only with no border, using primary color
-  * Usage : For actions that should be available but not emphasized
--->
+## 5. Component & screen conventions
+
+- Every screen component takes `add` (toast dispatcher) and, if it navigates
+  elsewhere, `nav`. Follow the existing signature:
+  `{ add, nav }: { add: AddToast; nav?: (s: string, label: string) => void }`.
+- New screens get added to the `Screen` union type in `data.tsx` first, then
+  wired into the `Router` in `App.tsx`, then added to the sidebar config if
+  they need direct navigation.
+- Role gating for a screen or action should check against the
+  `Role` type (`data.tsx`) and mirror the Role-Based Menu Visibility Matrix in
+  Blueprint Part 2.5 exactly — don't approximate it.
+- Reuse `StatCard`, `Badge`, `EmptyState`, `PageHeader`, `BtnP`/`BtnO`, `Inp`,
+  `Sel` from `App.tsx` before building a one-off equivalent.
+
+## 6. Naming & terminology
+
+- Product name is **Nexura**. "HMS" only appears now as a historical/internal
+  shorthand inside the blueprint docs — don't introduce new "HMS" branding in
+  UI copy, file names, or new docs.
+- Use the Blueprint's role codes consistently in code and comments: `PLT`,
+  `ORG`, `MGT`, `FD`, `RSV`, `HK`, `MX`, `RT`, `RO`, `CS`, `FIN`, `IT`
+  (Blueprint Part 2.4). Don't invent alternate abbreviations.
+- Screen references in commit messages / comments should use the Blueprint's
+  screen IDs where one exists (e.g. `FD-12`, `HK-04`, `MB-01`) — it's the
+  fastest way to cross-reference spec to code.
+
+## 7. What not to do
+
+- Don't add a screen or flow that isn't in the Blueprint's screen inventory
+  without checking with the user first — the inventory is deliberately
+  exhaustive ("no staged, deferred, or MVP framing").
+- Don't add online-only requirements to a flow that the Blueprint specifies
+  as offline-capable.
+- Don't hand-roll a new color, spacing value, or font outside the tokens in
+  Section 4.
+- Don't grow `Screens.tsx` further — split into per-module files as you touch
+  them (Section 2).

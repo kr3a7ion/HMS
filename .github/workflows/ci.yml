@@ -1,0 +1,58 @@
+name: CI
+
+# Typecheck + build every package on every push/PR (ROADMAP.md "Cross-cutting"
+# section). Three independent npm packages under apps/ (web, local-server,
+# central-server), each with its own package-lock.json -- matches how
+# they're actually developed and built locally, not a monorepo tool.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+
+  local-server:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/local-server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/local-server/package-lock.json
+      - run: npm ci
+      - run: npm run build
+
+  central-server:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/central-server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/central-server/package-lock.json
+      - run: npm ci
+      - run: npm run build

@@ -1,0 +1,9 @@
+node_modules
+apps/local-server/data/
+apps/local-server/dist/
+apps/local-server/public/
+apps/local-server/.env
+apps/central-server/data/
+apps/central-server/dist/
+apps/central-server/.env
+apps/web/dist/
