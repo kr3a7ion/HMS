@@ -319,6 +319,36 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 );
 CREATE INDEX IF NOT EXISTS idx_chat_messages_channel ON chat_messages(channel_id);
 
+-- CO-02 Guest Messaging -- see schema.ts's guestMessageThreads/guestMessages
+-- comment for why this is a real staff-facing communication log, not an
+-- actual WhatsApp/SMS sending gateway (no third-party credentials exist
+-- in this environment, same class of gap as TTLock/Docker).
+CREATE TABLE IF NOT EXISTS guest_message_threads (
+  id TEXT PRIMARY KEY,
+  branch_id TEXT NOT NULL REFERENCES branches(id),
+  guest_id TEXT NOT NULL REFERENCES guests(id),
+  status TEXT NOT NULL DEFAULT 'open',
+  forwarded_to_department TEXT,
+  escalated_at INTEGER,
+  resolved_at INTEGER,
+  resolved_by TEXT REFERENCES users(id),
+  last_message_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_guest_message_threads_branch ON guest_message_threads(branch_id);
+CREATE INDEX IF NOT EXISTS idx_guest_message_threads_guest ON guest_message_threads(guest_id);
+
+CREATE TABLE IF NOT EXISTS guest_messages (
+  id TEXT PRIMARY KEY,
+  thread_id TEXT NOT NULL REFERENCES guest_message_threads(id),
+  channel TEXT NOT NULL,
+  direction TEXT NOT NULL,
+  body TEXT NOT NULL,
+  logged_by TEXT NOT NULL REFERENCES users(id),
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_guest_messages_thread ON guest_messages(thread_id);
+
 CREATE TABLE IF NOT EXISTS announcements (
   id TEXT PRIMARY KEY,
   branch_id TEXT NOT NULL REFERENCES branches(id),

@@ -67,7 +67,8 @@ router.post("/staff", requireAuth, requirePermission("hr:manage"), async (req: A
   if (!parsed.success) return res.status(400).json({ error: "INVALID_INPUT", details: parsed.error.flatten() });
   if (!roleExists(parsed.data.role)) return res.status(400).json({ error: "INVALID_ROLE" });
 
-  const existing = db.select().from(users).where(eq(users.email, parsed.data.email)).get();
+  const email = parsed.data.email.toLowerCase();
+  const existing = db.select().from(users).where(eq(users.email, email)).get();
   if (existing) return res.status(409).json({ error: "EMAIL_IN_USE" });
 
   const tempPassword = randomTempPassword();
@@ -77,7 +78,7 @@ router.post("/staff", requireAuth, requirePermission("hr:manage"), async (req: A
   const employeeId = nextEmployeeId(req.auth!.branchId);
   db.insert(users).values({
     id, organizationId: req.auth!.orgId, branchId: req.auth!.branchId,
-    email: parsed.data.email, passwordHash, role: parsed.data.role,
+    email, passwordHash, role: parsed.data.role,
     firstName: parsed.data.firstName, lastName: parsed.data.lastName, status: "active",
     createdAt: now, employeeId, department: parsed.data.department,
     phone: parsed.data.phone, startDate: now, payRate: parsed.data.payRate,

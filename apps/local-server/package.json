@@ -12,7 +12,9 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "seed": "tsx src/seed.ts",
-    "test": "tsx --test src/test/**/*.test.ts"
+    "test": "tsx --test src/test/**/*.test.ts",
+    "openapi:generate": "node scripts/generate-openapi.mjs",
+    "openapi:lint": "redocly lint openapi.json"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -26,6 +28,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@redocly/cli": "^2.40.0",
     "@types/bcryptjs": "^2.4.6",
     "@types/better-sqlite3": "^7.6.11",
     "@types/cookie-parser": "^1.4.7",

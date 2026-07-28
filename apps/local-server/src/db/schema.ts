@@ -349,6 +349,43 @@ export const chatMessages = sqliteTable("chat_messages", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 });
 
+// CO-02 Guest Messaging. Real, but scoped honestly: there's no actual
+// WhatsApp/SMS gateway account in this codebase (same class of gap as
+// TTLock/Docker -- needs real third-party credentials this environment
+// doesn't have), and no guest-facing portal exists anywhere in this system
+// for an "internal portal" message to actually be delivered to. So this is
+// a real staff-facing guest-communication LOG and coordination tool, not an
+// outbound message-sending gateway: staff record what was actually said to
+// (or heard from) a guest -- over a phone call, their own WhatsApp, in
+// person, whatever really happened -- so the whole team has one shared,
+// threaded, real record instead of no record at all. `channel` is metadata
+// about how that real-world conversation happened, not a delivery promise.
+// One thread per guest (not per-reservation) -- a repeat guest's history
+// carries across stays, matching real front-desk value ("this guest has
+// asked about late checkout before").
+export const guestMessageThreads = sqliteTable("guest_message_threads", {
+  id: text("id").primaryKey(),
+  branchId: text("branch_id").notNull().references(() => branches.id),
+  guestId: text("guest_id").notNull().references(() => guests.id),
+  status: text("status").notNull().default("open"), // open|forwarded|escalated|resolved
+  forwardedToDepartment: text("forwarded_to_department"),
+  escalatedAt: integer("escalated_at", { mode: "timestamp" }),
+  resolvedAt: integer("resolved_at", { mode: "timestamp" }),
+  resolvedBy: text("resolved_by").references(() => users.id),
+  lastMessageAt: integer("last_message_at", { mode: "timestamp" }).notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+});
+
+export const guestMessages = sqliteTable("guest_messages", {
+  id: text("id").primaryKey(),
+  threadId: text("thread_id").notNull().references(() => guestMessageThreads.id),
+  channel: text("channel").notNull(), // whatsapp|sms|internal -- real-world channel, see table comment above
+  direction: text("direction").notNull(), // to_guest|from_guest
+  body: text("body").notNull(),
+  loggedBy: text("logged_by").notNull().references(() => users.id),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+});
+
 // CO-03 Announcements.
 export const announcements = sqliteTable("announcements", {
   id: text("id").primaryKey(),

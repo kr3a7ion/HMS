@@ -41,6 +41,8 @@ export const PERMISSION_KEYS: PermissionKeyDef[] = [
   { key: "frontoffice:lostfound", label: "Log / claim / dispose lost & found items", module: "Front Office" },
   { key: "handover:use", label: "Shift handover notes", module: "Front Office" },
   { key: "announcements:manage", label: "Post / archive staff announcements", module: "Front Office" },
+  // CO-02. Blueprint 1031: "Roles: FD, RO, CS, MGT, ORG".
+  { key: "guests:message", label: "Log / forward / escalate guest communications", module: "Front Office" },
 
   { key: "inventory:read", label: "View stock levels", module: "Inventory" },
   { key: "inventory:write", label: "Adjust stock / receive deliveries", module: "Inventory" },
@@ -78,6 +80,7 @@ export const SYSTEM_ROLE_SEED: Record<string, SystemRoleSeed> = {
     name: "Front Desk", permissions: [
       "reservations:create", "reservations:checkinout", "guests:create",
       "folio:read", "folio:postcharge", "doorlock:use", "handover:use",
+      "guests:message",
     ],
   },
   RSV: {
@@ -105,11 +108,13 @@ export const SYSTEM_ROLE_SEED: Record<string, SystemRoleSeed> = {
   RO: {
     name: "Resident Officer", permissions: [
       "housekeeping:inspect", "frontoffice:lostfound", "handover:use",
+      "guests:message",
     ],
   },
   CS: {
     name: "Customer Service", permissions: [
       "guests:create", "frontoffice:lostfound", "reports:guests",
+      "guests:message",
     ],
   },
   FIN: {

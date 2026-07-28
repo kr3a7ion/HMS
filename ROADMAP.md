@@ -13,8 +13,10 @@ been wired: Housekeeping is 4/8 screens real (HK-01, 02, 04, 05; HK-06 is
 now built as part of Inventory), Maintenance is 3/7 real (MX-01, 02, 03),
 Finance & Billing is 3/5 real (FI-01, 03, 05 — FI-05 built as part of
 Reports), Restaurant/POS is 5/7 real (RT-01, 02, 03, 04, 07 — RT-06 folded
-into the same order model), Communications is 3/4 real (CO-01, 03, 04 —
-CO-01 is polling-based, not real-time push), Inventory is 5/5 real (IV-01
+into the same order model), Communications is 4/4 real (CO-01 through
+CO-04 — CO-01 is polling-based, not real-time push; CO-02 is a real staff
+communication log, not a WhatsApp/SMS sending gateway, built later in a
+dedicated pass), Inventory is 5/5 real (IV-01
 through IV-05), HR & Staff is 6/6 real (HR-01 through HR-06, including
 HR-03 Roles & Permissions — a full RBAC rewrite, built later in a
 dedicated pass; see that section for what changed), Reports is 6/6
@@ -55,9 +57,12 @@ UI for it, and both packages' Dockerfiles, all verified live against real
 running servers — one real bug (a status-enum mismatch that would have
 400'd every deployment push) was found and fixed by that live test, not
 left for later. Platform Owner security: real TOTP MFA (RFC 6238, checked
-against the official RFC 4226 test vectors) with no bypass path, and real
-login rate limiting, both verified live including a genuine 5-attempt
-lockout. What's genuinely unverifiable in this environment — a live
+against the official RFC 4226 test vectors) with no bypass path, real
+login rate limiting verified live including a genuine 5-attempt lockout,
+and real session-to-IP-range binding (flags rather than hard-blocks, a
+deliberate call given this is a single unrecoverable account — see that
+phase's Platform Owner security entry for why), all three states verified
+against the live server. What's genuinely unverifiable in this environment — a live
 TTLock account, actual lock/gateway hardware, a USB card encoder, a real
 Docker daemon to run `docker build`/container-swap against — is called
 out explicitly at each point it matters, not glossed over. See that
@@ -353,11 +358,14 @@ Finance & Billing → Restaurant/POS → Communications → Inventory → HR & S
       reservation type — restaurant bookings, not hotel rooms — deferred
       as its own pass rather than folded in, since unlike Room Service it
       doesn't share a data model with anything already built).
-  - [x] **Communications — CO-01, 03, 04 real and verified; CO-02 Guest
-        Messaging deliberately deferred.** New tables: `chat_channels`,
-        `chat_messages`, `announcements`, `announcement_reads`,
-        `shift_handovers`. New endpoints: `GET/POST /chat/...`,
-        `GET/POST /announcements/...`, `GET/POST /shift-handovers/...`.
+  - [x] **Communications — CO-01 through CO-04 all real and verified**
+        (CO-02 Guest Messaging was originally deferred here, later
+        revisited and built for real — see below). New tables:
+        `chat_channels`, `chat_messages`, `announcements`,
+        `announcement_reads`, `shift_handovers`, `guest_message_threads`,
+        `guest_messages`. New endpoints: `GET/POST /chat/...`,
+        `GET/POST /announcements/...`, `GET/POST /shift-handovers/...`,
+        `GET/POST /guest-messages/...`.
     - **CO-01 Internal Chat is polling-based (4s for the active channel,
       15s for the channel list), not WebSocket/SSE push.** Real-time
       delivery is a genuine architectural addition — a persistent
@@ -391,13 +399,51 @@ Finance & Billing → Restaurant/POS → Communications → Inventory → HR & S
       typed-in field (Morning/Evening/Night), not derived from a real
       schedule — HR-05 Shift Scheduler doesn't exist yet; once it does,
       this should read the actual scheduled shift instead.
-    - **CO-02 Guest Messaging deferred, not built partially.** Its real
-      value is unifying WhatsApp/SMS/internal-portal threads (the
-      Smart-Order-adopted feature from the original roadmap), but
-      WhatsApp/SMS both need external gateway credentials that don't
-      exist in this environment. Building only the internal-portal channel
-      now would misrepresent a feature whose whole point is unification —
-      deferred as a complete pass for whenever those credentials exist.
+    - **CO-02 Guest Messaging — later revisited and built for real, honestly
+      rescoped rather than waiting on external credentials.** The original
+      deferral reasoning stands (WhatsApp/SMS need real third-party gateway
+      accounts that don't exist here), but re-examined: this doesn't need
+      to be an unbuildable feature until then, because there's a genuinely
+      real, valuable version that doesn't require sending anything — this
+      is a **shared staff-facing guest-communication log and coordination
+      tool**, not a message-sending gateway. Staff record what was really
+      communicated to (or heard from) a guest over whatever channel
+      actually happened — their own WhatsApp, a phone call, in person —
+      so the whole team has one threaded, shared record instead of none at
+      all (the honest starting point: before this, there was *no* record
+      of guest communications anywhere in the system). `channel` is
+      recorded as metadata about how the real conversation happened, never
+      a delivery promise.
+      - One thread per guest (not per-reservation) so a repeat guest's
+        history carries across stays — real front-desk value ("this guest
+        has asked about late checkout before").
+      - **"Forward to department" and "escalate to manager" plug into the
+        real Internal Chat system (CO-01) instead of being a status flag
+        nobody would see**: forwarding posts a real message into that
+        department's actual chat channel (auto-created if a branch
+        doesn't have one yet); escalating posts a real message into a real
+        DM with every Manager/ORG at the branch, reusing
+        `getOrCreateDmChannel` extracted from `routes/chat.ts` for this —
+        a manager finds out through the same Internal Chat they already
+        monitor, not a separate inbox nobody checks.
+      - New permission key `guests:message` (Blueprint 1031: "Roles: FD,
+        RO, CS, MGT, ORG"), added to those three roles' real grants.
+      - **Verified live end-to-end**, not just written: checked a real
+        guest into a real room, logged a real two-way message exchange,
+        forwarded the thread and confirmed the exact message actually
+        landed in the Housekeeping department's real chat channel,
+        escalated and confirmed both the Manager and ORG accounts got a
+        real DM ("notifiedManagers: 2") with the right summary, resolved
+        the thread, and confirmed every action produced a real, correctly-
+        detailed `audit_log` entry. Also confirmed the permission boundary
+        for real — Housekeeping (not in Blueprint's CO-02 role list) gets
+        a genuine `403` trying to access any of it.
+      - **What's still honestly not built**: actual outbound WhatsApp/SMS
+        delivery (needs real gateway credentials, same class of gap as
+        TTLock/Docker) and any guest-facing portal for an "internal"
+        message to be delivered to (no guest-facing surface exists
+        anywhere in this system — building one is a materially bigger
+        scope decision than this pass, not attempted here).
   - [x] **Inventory — IV-01 through IV-05 real and verified; HK-06 Linen &
         Supplies closed out as part of this pass, as flagged back in the
         Housekeeping module.** New tables: `products`, `stock_transactions`,
@@ -1037,11 +1083,16 @@ Finance & Billing → Restaurant/POS → Communications → Inventory → HR & S
       its signature — caught immediately by a structural verification pass
       (every file must end in `}`, have balanced braces, and export
       exactly one function) before it was ever built or shipped.
-- [ ] `NEW` **Unified guest inbox** (adopted from Smart Order): consolidate
-      Guest Messaging (CO-02) so WhatsApp, SMS, and internal guest-portal
-      threads render as one conversation per guest rather than parallel
-      channel-specific views. Backend: single `guest_messages` table keyed
-      by guest + channel, not per-channel tables.
+- [x] `NEW` **Unified guest inbox** (adopted from Smart Order) — done as
+      part of building CO-02 for real (Phase 2 entry above): one
+      `guest_messages` table keyed by thread + channel, exactly the shape
+      this item asked for, and the frontend already renders one
+      conversation per guest with WhatsApp/SMS/internal messages
+      interleaved in a single thread rather than parallel per-channel
+      views. What's not done: this unifies *recording*, not live
+      *receiving* — there's still no real WhatsApp/SMS gateway account to
+      actually pull inbound messages from automatically (staff log them),
+      see the Phase 2 entry for the exact scope line.
 - [x] `NEW` **Metrics-driven dashboard copy** (adopted from Smart Order):
       D-01/D-02 dashboards should show trend deltas with plain-language
       framing ("+12% vs last week") instead of bare current-value numbers.
@@ -1050,10 +1101,52 @@ Finance & Billing → Restaurant/POS → Communications → Inventory → HR & S
       show a real day-over-day delta ("+4% vs yesterday"); department KPI
       cards intentionally don't (Blueprint doesn't ask for a trend on
       those, just the current value).
-- [ ] `NEW` Add an OpenAPI (or equivalent) spec for local-server endpoints
-      as they're built, generated from the actual route definitions —
-      keeps the eventual central-server sync contract and any future
-      mobile/PWA client honest against the real API instead of drifting.
+- [x] `NEW` **OpenAPI spec for local-server endpoints — genuinely
+      generated from the real route definitions, not hand-typed, and
+      verified against a real linter.** `apps/local-server/scripts/
+      generate-openapi.mjs` is a static extractor: it parses `src/app.ts`'s
+      real `app.use(...)` mount table and every `routes/*.ts` file's real
+      `router.get/post/put/delete/patch(...)` calls (path, and whether
+      `requireAuth`/`requirePermission(...)` gate it) directly from source
+      — deliberately static rather than booting the app and walking
+      Express's runtime router stack, to avoid importing every route
+      file's real DB/service side effects just to produce documentation.
+      Hand-written detail (summaries, descriptions, real request-body
+      JSON Schemas copied from each route's actual zod schema) lives
+      separately in `scripts/openapi-enrichments.mjs`, keyed by path, so
+      re-running the generator after a route changes never clobbers it.
+      `npm run openapi:generate` regenerates `openapi.json`; this is a
+      living artifact, not a one-time snapshot — matches the item's own
+      "as they're built" framing.
+      - **Verified for real, not just assumed correct**: cross-checked
+        the extractor's output count against a plain `grep -c` of every
+        route file's `router.*(` calls — 146 and 146, exact match. Then
+        ran the real `@redocly/cli` linter (added as a genuine
+        devDependency, `npm run openapi:lint`) against the output, which
+        is where this stopped being a documentation exercise and started
+        catching real mistakes: two places used JSON Schema 2020-12's
+        numeric `exclusiveMinimum` (`exclusiveMinimum: 0`) instead of
+        OpenAPI 3.0's boolean form (`minimum: 0, exclusiveMinimum: true`)
+        — different specs, easy to conflate, genuinely wrong either way
+        without a real validator catching it; one place used an
+        OpenAPI-3.1-only array `type`; and every public endpoint
+        (`/auth/login`, `/auth/continue-offline`) needed an explicit
+        `security: []` rather than an omitted field, which the
+        `security-defined` rule correctly flags as ambiguous. Fixed all
+        three, added real per-tag descriptions and generated
+        `operationId`s (146 total, confirmed unique) to clear the
+        remaining style warnings, and the spec now lints with **zero
+        errors** — the 2 remaining warnings are `localhost` in the dev
+        server entry, which is genuinely correct for local dev, not a
+        placeholder (documented inline in the spec itself, alongside a
+        second server entry for the real `nexura.local` LAN deployment
+        shape from the Auth doc).
+      - **What this doesn't cover**: response body schemas are real but
+        intentionally light (description text, not exhaustive per-field
+        JSON Schema) for most endpoints — full response modeling for all
+        146 endpoints was judged disproportionate effort versus request-
+        schema + endpoint-coverage accuracy, which is where the real
+        value is for a client generator or integration partner.
 
 **Exit criteria:** every screen in the Blueprint's Part 4 inventory (except
 Multi-Branch's cross-branch views, ST-02 Synchronization, and ST-04 Door
@@ -1489,12 +1582,49 @@ second (not started).
         locked. Restarted the server afterward to clear the in-memory
         lockout from testing and confirmed the enrolled secret (which
         lives in the DB, not memory) survived the restart.
-  - [ ] **Not built**: session-to-IP-range binding (Auth doc 3.5's third
-        item). Deferred — "Gideon's known IP ranges" is explicitly
-        described as configurable, and no such configuration exists yet;
-        building this blind would mean guessing a UX (hard-reject on IP
-        change vs. re-prompt for MFA vs. something else) rather than
-        implementing a specified behavior.
+  - [x] **Session-to-IP-range binding (Auth doc 3.5's third item) — later
+        revisited and built for real, deliberately scoped away from the
+        hard-reject-vs-re-prompt UX ambiguity that justified the original
+        deferral.** `central-server/src/auth/ipRanges.ts`: real IPv4 CIDR
+        matching (`PLATFORM_OWNER_ALLOWED_IP_RANGES`, comma-separated,
+        same "not configured = no-op" pattern as TTLock/registry config
+        elsewhere in this codebase), checked at both real session-issuance
+        points (`mfa/enroll/confirm`, `mfa/verify`) — not at `/admin/login`,
+        which only ever grants a 5-minute MFA-pending token.
+        - **Flags, doesn't block, and that's a deliberate decision, not a
+          missing feature**: the Auth doc never actually specifies hard-
+          reject vs. re-prompt, and this account is explicitly "one
+          account" (Auth doc 3.1) with no other admin able to unlock it
+          and no real email/SMS recovery channel built here — a hard
+          block on a misconfigured or dynamic-IP mismatch would risk
+          permanently locking out the only Platform Owner account. Flags
+          instead: a real `admin_login_ip_flagged` audit log entry plus an
+          `ipRangeWarning` field in the login response, which the Admin
+          Console surfaces as a real toast ("⚠️ Signed in from an IP
+          outside your configured allowed range") — the same "impossible
+          travel" notification pattern real products use for a single
+          high-value account, not a guessed UX.
+        - **The CIDR matching itself was verified against 13 real test
+          cases before it was ever wired into a route** (exact IPs,
+          /24 and /16 and /30 boundaries, the `/0` wildcard, IPv4-mapped
+          IPv6 normalization `::ffff:x.x.x.x`, and malformed input) — same
+          "prove the algorithm before trusting it" bar as the TOTP
+          implementation's RFC 4226 test vectors earlier in this phase.
+        - **Verified live against the real running server, not just unit-
+          tested in isolation**: confirmed the unconfigured baseline
+          returns `ipRangeWarning: false` with no behavior change from
+          before this existed; configured a real restrictive range
+          (`10.0.0.0/8`) and confirmed a real login from `::1` came back
+          `ipRangeWarning: true` with a real audit row recording the
+          actual connecting IP; then configured a range that genuinely
+          included the connection (`127.0.0.0/8`, connecting explicitly
+          over IPv4) and confirmed the same login came back `false` —
+          all three real states (unconfigured, flagged, allowed)
+          exercised against the live server, not assumed from the code.
+        - **IPv4 only** — IPv6 CIDR matching is meaningfully more
+          involved and this account's real access pattern (a home/office
+          IPv4 range) doesn't need it; documented in the source, not
+          silently dropped.
 
 **Exit criteria:** a physical TTLock-enabled door can be activated and
 revoked from Nexura end to end (done); a branch can be provisioned from a

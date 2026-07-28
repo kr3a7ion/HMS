@@ -1,0 +1,5930 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Nexura Local Server API",
+    "version": "0.0.1",
+    "description": "The per-branch local server's real API surface -- LAN-only, offline-first (Auth/Distribution doc Part 2: this server has no public URL; it's reachable only on the hotel's own network). Every path below was extracted directly from the real Express route definitions in `src/routes/*.ts` (see `scripts/generate-openapi.mjs`), not hand-typed -- run `npm run openapi:generate` after changing routes to keep this in sync. Auth is a JWT in an httpOnly `access_token` cookie (12h, with an 8h offline-continuation grace period -- see `src/auth/tokens.ts`), not a bearer token in the traditional OpenAPI sense; represented here as a cookie API key for tooling compatibility.",
+    "license": {
+      "name": "Proprietary — internal use only"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:4000",
+      "description": "Local dev server"
+    },
+    {
+      "url": "http://nexura.local:4000",
+      "description": "Real branch deployment (Auth doc Part 2, Layer 3) -- LAN hostname, no public DNS/TLS. `localhost` above is genuinely correct for dev, not a placeholder; this second entry is the real production shape."
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "cookieAuth": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "access_token"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Auth",
+      "description": "Branch staff session lifecycle -- login, logout, offline continuation, password change."
+    },
+    {
+      "name": "Rooms",
+      "description": "Real-time room list for the branch."
+    },
+    {
+      "name": "Guests",
+      "description": "Guest profile search and creation."
+    },
+    {
+      "name": "Reservations",
+      "description": "R-01/R-02, FD-01, FD-02, FD-10 -- the reservation and folio lifecycle."
+    },
+    {
+      "name": "Housekeeping",
+      "description": "HK-01/04/05 -- room status board, inspections, lost & found."
+    },
+    {
+      "name": "Users",
+      "description": "Lightweight staff picker, distinct from HR-01's full Staff Directory."
+    },
+    {
+      "name": "Lost & Found",
+      "description": "HK-05."
+    },
+    {
+      "name": "Maintenance",
+      "description": "MX-01/02/03 -- work order lifecycle with a real event timeline."
+    },
+    {
+      "name": "Finance & Billing",
+      "description": "FI-01/03 -- folio management and daily summary."
+    },
+    {
+      "name": "Restaurant / POS",
+      "description": "RT-01 through RT-07 -- menu, tables, orders, kitchen display, room charges."
+    },
+    {
+      "name": "Internal Chat",
+      "description": "CO-01 -- polling-based staff chat, department channels and DMs."
+    },
+    {
+      "name": "Guest Messaging",
+      "description": "CO-02 -- a real staff-facing guest-communication log, not a WhatsApp/SMS gateway. See the operation descriptions for what that means."
+    },
+    {
+      "name": "Announcements",
+      "description": "CO-03."
+    },
+    {
+      "name": "Shift Handover",
+      "description": "CO-04."
+    },
+    {
+      "name": "Inventory",
+      "description": "IV-01 through IV-05 -- stock, suppliers, purchase orders."
+    },
+    {
+      "name": "HR & Staff",
+      "description": "HR-01 through HR-06, including HR-03's live, DB-backed permission matrix."
+    },
+    {
+      "name": "Reports",
+      "description": "RP-01 through RP-06."
+    },
+    {
+      "name": "IT Admin",
+      "description": "IT-01 through IT-05 -- users, system health, devices, backups, audit log."
+    },
+    {
+      "name": "Settings",
+      "description": "ST-01/03 -- branch config and personal preferences."
+    },
+    {
+      "name": "Dashboard",
+      "description": "D-01/D-02."
+    },
+    {
+      "name": "Sync",
+      "description": "ST-02 -- KPI push/pull with the central server, plus deployment/update status."
+    },
+    {
+      "name": "Door Lock",
+      "description": "Blueprint Part 6 -- TTLock integration, credentials, and the offline command queue."
+    }
+  ],
+  "paths": {
+    "/admin/audit-log": {
+      "get": {
+        "operationId": "getAdminAuditLog",
+        "tags": [
+          "IT Admin"
+        ],
+        "summary": "Platform-level audit log (IT-05)",
+        "description": "Append-only, enforced at the DB level with `BEFORE UPDATE`/`BEFORE DELETE` triggers, not just an absent delete endpoint.\n\n**Requires permission:** `admin:operations`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/admin/backups": {
+      "get": {
+        "operationId": "getAdminBackups",
+        "tags": [
+          "IT Admin"
+        ],
+        "summary": "Backup Snapshots list (IT-04)",
+        "description": "**Requires permission:** `admin:operations`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postAdminBackups",
+        "tags": [
+          "IT Admin"
+        ],
+        "summary": "Create a backup snapshot (IT-04)",
+        "description": "**Requires permission:** `admin:operations`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/admin/backups/{id}/restore": {
+      "post": {
+        "operationId": "postAdminBackupsByIdRestore",
+        "tags": [
+          "IT Admin"
+        ],
+        "summary": "Restore from a backup snapshot (IT-04)",
+        "description": "Stages a restore marker — the running process can't safely swap its own open SQLite file mid-request, so this applies on the *next* server boot, not immediately.\n\n**Requires permission:** `admin:operations`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "confirm"
+                ],
+                "properties": {
+                  "confirm": {
+                    "type": "string",
+                    "enum": [
+                      "RESTORE"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/admin/devices": {
+      "get": {
+        "operationId": "getAdminDevices",
+        "tags": [
+          "IT Admin"
+        ],
+        "summary": "Authorized devices / active sessions (IT-03)",
+        "description": "**Requires permission:** `admin:devices`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/admin/devices/{sessionId}/deauthorize": {
+      "post": {
+        "operationId": "postAdminDevicesBySessionIdDeauthorize",
+        "tags": [
+          "IT Admin"
+        ],
+        "summary": "Revoke a session (IT-03)",
+        "description": "**Requires permission:** `admin:devices`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/admin/diagnostics": {
+      "post": {
+        "operationId": "postAdminDiagnostics",
+        "tags": [
+          "IT Admin"
+        ],
+        "summary": "Run a diagnostics check (IT-02)",
+        "description": "**Requires permission:** `admin:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/admin/error-log": {
+      "get": {
+        "operationId": "getAdminErrorLog",
+        "tags": [
+          "IT Admin"
+        ],
+        "summary": "Captured server error log (IT-02)",
+        "description": "**Requires permission:** `admin:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/admin/system-health": {
+      "get": {
+        "operationId": "getAdminSystemHealth",
+        "tags": [
+          "IT Admin"
+        ],
+        "summary": "System Health (IT-02)",
+        "description": "**Requires permission:** `admin:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/admin/users": {
+      "get": {
+        "operationId": "getAdminUsers",
+        "tags": [
+          "IT Admin"
+        ],
+        "summary": "User Management list (IT-01)",
+        "description": "**Requires permission:** `admin:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postAdminUsers",
+        "tags": [
+          "IT Admin"
+        ],
+        "summary": "Invite a new user (IT-01)",
+        "description": "Returns a one-time temp password. `role` validated against the live `roles` table.\n\n**Requires permission:** `admin:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email",
+                  "firstName",
+                  "lastName",
+                  "role"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "firstName": {
+                    "type": "string"
+                  },
+                  "lastName": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/admin/users/{id}/audit-log": {
+      "get": {
+        "operationId": "getAdminUsersByIdAuditLog",
+        "tags": [
+          "IT Admin"
+        ],
+        "summary": "Per-user audit history",
+        "description": "**Requires permission:** `admin:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/admin/users/{id}/deactivate": {
+      "post": {
+        "operationId": "postAdminUsersByIdDeactivate",
+        "tags": [
+          "IT Admin"
+        ],
+        "summary": "Deactivate a user",
+        "description": "**Requires permission:** `admin:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/admin/users/{id}/reactivate": {
+      "post": {
+        "operationId": "postAdminUsersByIdReactivate",
+        "tags": [
+          "IT Admin"
+        ],
+        "summary": "Reactivate a user",
+        "description": "**Requires permission:** `admin:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/admin/users/{id}/reset-password": {
+      "post": {
+        "operationId": "postAdminUsersByIdResetPassword",
+        "tags": [
+          "IT Admin"
+        ],
+        "summary": "Reset a user's password (IT-01)",
+        "description": "**Requires permission:** `admin:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/admin/users/{id}/role": {
+      "post": {
+        "operationId": "postAdminUsersByIdRole",
+        "tags": [
+          "IT Admin"
+        ],
+        "summary": "Change a user's role",
+        "description": "**Requires permission:** `admin:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "role"
+                ],
+                "properties": {
+                  "role": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/announcements": {
+      "get": {
+        "operationId": "getAnnouncements",
+        "tags": [
+          "Announcements"
+        ],
+        "summary": "Announcement list (CO-03)",
+        "description": "`?archived=true` includes archived ones. Read counts are real, tracked via `announcement_reads`.\n\n**Requires authentication** (any role).",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postAnnouncements",
+        "tags": [
+          "Announcements"
+        ],
+        "summary": "Post an announcement",
+        "description": "**Requires permission:** `announcements:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "title",
+                  "body"
+                ],
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "body": {
+                    "type": "string"
+                  },
+                  "targetAudience": {
+                    "type": "string",
+                    "default": "all"
+                  },
+                  "expiresAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/announcements/{id}/archive": {
+      "post": {
+        "operationId": "postAnnouncementsByIdArchive",
+        "tags": [
+          "Announcements"
+        ],
+        "summary": "Archive an announcement",
+        "description": "**Requires permission:** `announcements:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/announcements/{id}/read": {
+      "post": {
+        "operationId": "postAnnouncementsByIdRead",
+        "tags": [
+          "Announcements"
+        ],
+        "summary": "Mark an announcement read",
+        "description": "Passive — called when a viewer loads the screen with the announcement visible, not a manual action.\n\n**Requires authentication** (any role).",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        }
+      }
+    },
+    "/auth/change-password": {
+      "post": {
+        "operationId": "postAuthChangePassword",
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Change own password",
+        "description": "**Requires authentication** (any role).",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "currentPassword",
+                  "newPassword"
+                ],
+                "properties": {
+                  "currentPassword": {
+                    "type": "string"
+                  },
+                  "newPassword": {
+                    "type": "string",
+                    "minLength": 8
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        }
+      }
+    },
+    "/auth/continue-offline": {
+      "post": {
+        "operationId": "postAuthContinueOffline",
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Offline session extension",
+        "description": "Auth doc Part 7.1. Not gated by `requireAuth` because the whole point is the access token has *expired* -- this endpoint validates the expired token itself and, if it expired within the last 8 hours (`GRACE_PERIOD_HOURS`), issues a 4-hour extension token. Past that window, returns 401 `GRACE_PERIOD_EXPIRED`.\n\n**No authentication required.**",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "operationId": "postAuthLogin",
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Branch staff login",
+        "description": "Issues an `access_token` (12h) and `refresh_token` (30d) httpOnly cookie pair. See Auth doc Part 6.1.\n\n**No authentication required.**",
+        "security": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email",
+                  "password"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "password": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "operationId": "postAuthLogout",
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Log out",
+        "description": "Clears the session cookies and revokes the session server-side.\n\n**Requires authentication** (any role).",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        }
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "operationId": "getAuthMe",
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Current session identity",
+        "description": "**Requires authentication** (any role).",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        }
+      }
+    },
+    "/chat/channels": {
+      "get": {
+        "operationId": "getChatChannels",
+        "tags": [
+          "Internal Chat"
+        ],
+        "summary": "Internal Chat channel list (CO-01)",
+        "description": "Department channels plus any DM involving the caller, each with a last-message preview. Polling-based (frontend polls every 15s), not push.\n\n**Requires authentication** (any role).",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        }
+      }
+    },
+    "/chat/channels/{id}/messages": {
+      "get": {
+        "operationId": "getChatChannelsByIdMessages",
+        "tags": [
+          "Internal Chat"
+        ],
+        "summary": "Message history for a channel",
+        "description": "403/404s for a DM the caller isn't a party to. Frontend polls every 4s for the active channel.\n\n**Requires authentication** (any role).",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postChatChannelsByIdMessages",
+        "tags": [
+          "Internal Chat"
+        ],
+        "summary": "Send a chat message",
+        "description": "**Requires authentication** (any role).",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "body"
+                ],
+                "properties": {
+                  "body": {
+                    "type": "string"
+                  },
+                  "emergency": {
+                    "type": "boolean",
+                    "description": "Emergency Broadcast — posts to #All Staff with a flagged banner."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        }
+      }
+    },
+    "/chat/dm": {
+      "post": {
+        "operationId": "postChatDm",
+        "tags": [
+          "Internal Chat"
+        ],
+        "summary": "Find or create a DM channel",
+        "description": "**Requires authentication** (any role).",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "otherUserId"
+                ],
+                "properties": {
+                  "otherUserId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        }
+      }
+    },
+    "/dashboard/me": {
+      "get": {
+        "operationId": "getDashboardMe",
+        "tags": [
+          "Dashboard"
+        ],
+        "summary": "Role-based dashboard (D-01)",
+        "description": "`?role=` lets MGT/ORG preview another role's dashboard — server-enforced, silently ignored for anyone else.\n\n**Requires authentication** (any role).",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        }
+      }
+    },
+    "/dashboard/overview": {
+      "get": {
+        "operationId": "getDashboardOverview",
+        "tags": [
+          "Dashboard"
+        ],
+        "summary": "Management overview dashboard (D-02)",
+        "description": "**Requires authentication** (any role).",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        }
+      }
+    },
+    "/door-lock/config": {
+      "get": {
+        "operationId": "getDoorLockConfig",
+        "tags": [
+          "Door Lock"
+        ],
+        "summary": "Door lock provider config (ST-04)",
+        "description": "Secrets are write-only — `hasClientSecret`/`hasPassword` booleans are returned instead of the real values.\n\n**Requires permission:** `doorlock:configure`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postDoorLockConfig",
+        "tags": [
+          "Door Lock"
+        ],
+        "summary": "Update door lock provider config",
+        "description": "An empty string for `clientSecret`/`password` means 'leave unchanged', since the real value is never echoed back to the frontend to re-submit.\n\n**Requires permission:** `doorlock:configure`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string"
+                  },
+                  "clientId": {
+                    "type": "string"
+                  },
+                  "clientSecret": {
+                    "type": "string"
+                  },
+                  "username": {
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string"
+                  },
+                  "autoRevokeOnCheckout": {
+                    "type": "boolean"
+                  },
+                  "queueWhenOffline": {
+                    "type": "boolean"
+                  },
+                  "notifyMgtOnOfflineRevoke": {
+                    "type": "boolean"
+                  },
+                  "maxCardsPerCheckIn": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 10
+                  },
+                  "queueExpiryBufferHours": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 24
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/door-lock/config/test-connection": {
+      "post": {
+        "operationId": "postDoorLockConfigTestConnection",
+        "tags": [
+          "Door Lock"
+        ],
+        "summary": "Test the configured TTLock connection",
+        "description": "A real call against TTLock's live API — a genuine 'invalid client_id' from `api.sciener.com` is a successful test of the adapter, not a failure of this endpoint.\n\n**Requires permission:** `doorlock:configure`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/door-lock/credentials": {
+      "get": {
+        "operationId": "getDoorLockCredentials",
+        "tags": [
+          "Door Lock"
+        ],
+        "summary": "Access credentials (FD-09/12/14)",
+        "description": "`?status=` filters (`active` by default, or `all`).\n\n**Requires permission:** `doorlock:use`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/door-lock/events": {
+      "get": {
+        "operationId": "getDoorLockEvents",
+        "tags": [
+          "Door Lock"
+        ],
+        "summary": "Key Card Log (FD-13)",
+        "description": "Real append-only event feed, most recent 500.\n\n**Requires permission:** `doorlock:use`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/door-lock/issue": {
+      "post": {
+        "operationId": "postDoorLockIssue",
+        "tags": [
+          "Door Lock"
+        ],
+        "summary": "Issue a card or PIN credential (Check-In step 7, FD-12, FD-14)",
+        "description": "Refuses with `409 MAX_CARDS_REACHED` past the configured per-checkin card limit unless `isDuplicate` is set.\n\n**Requires permission:** `doorlock:use`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reservationId",
+                  "credentialType"
+                ],
+                "properties": {
+                  "reservationId": {
+                    "type": "string"
+                  },
+                  "credentialType": {
+                    "type": "string",
+                    "enum": [
+                      "card",
+                      "pin"
+                    ]
+                  },
+                  "isDuplicate": {
+                    "type": "boolean"
+                  },
+                  "parentCredentialId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/door-lock/physical-key": {
+      "post": {
+        "operationId": "postDoorLockPhysicalKey",
+        "tags": [
+          "Door Lock"
+        ],
+        "summary": "Log a physical key fallback issuance",
+        "description": "**Requires permission:** `doorlock:use`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reservationId",
+                  "keyReference"
+                ],
+                "properties": {
+                  "reservationId": {
+                    "type": "string"
+                  },
+                  "keyReference": {
+                    "type": "string"
+                  },
+                  "notes": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/door-lock/queue": {
+      "get": {
+        "operationId": "getDoorLockQueue",
+        "tags": [
+          "Door Lock"
+        ],
+        "summary": "Lock Command Queue Monitor (6.10)",
+        "description": "Pending offline-queued lock commands for the branch.\n\n**Requires permission:** `doorlock:use`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/door-lock/queue/retry-now": {
+      "post": {
+        "operationId": "postDoorLockQueueRetryNow",
+        "tags": [
+          "Door Lock"
+        ],
+        "summary": "Force an immediate queue retry",
+        "description": "**Requires permission:** `doorlock:use`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/door-lock/revoke-room/{roomId}": {
+      "post": {
+        "operationId": "postDoorLockRevokeRoomByRoomId",
+        "tags": [
+          "Door Lock"
+        ],
+        "summary": "Emergency Revoke — every credential for a room (Blueprint 6.8)",
+        "description": "**Requires permission:** `doorlock:use`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "roomId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reason"
+                ],
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/door-lock/revoke/{credentialId}": {
+      "post": {
+        "operationId": "postDoorLockRevokeByCredentialId",
+        "tags": [
+          "Door Lock"
+        ],
+        "summary": "Revoke a single credential",
+        "description": "**Requires permission:** `doorlock:use`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "credentialId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reason"
+                ],
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "enum": [
+                      "checkout",
+                      "lost",
+                      "expired",
+                      "manual",
+                      "emergency"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/door-lock/room-mapping": {
+      "get": {
+        "operationId": "getDoorLockRoomMapping",
+        "tags": [
+          "Door Lock"
+        ],
+        "summary": "Room ↔ physical lock mapping",
+        "description": "**Requires permission:** `doorlock:configure`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postDoorLockRoomMapping",
+        "tags": [
+          "Door Lock"
+        ],
+        "summary": "Set a room's lock mapping",
+        "description": "**Requires permission:** `doorlock:configure`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "roomId",
+                  "ttlockLockId",
+                  "lockName"
+                ],
+                "properties": {
+                  "roomId": {
+                    "type": "string"
+                  },
+                  "ttlockLockId": {
+                    "type": "string"
+                  },
+                  "lockName": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/door-lock/room-mapping/auto-map": {
+      "post": {
+        "operationId": "postDoorLockRoomMappingAutoMap",
+        "tags": [
+          "Door Lock"
+        ],
+        "summary": "Auto-map rooms to locks by name (Blueprint 6.11)",
+        "description": "Calls TTLock's real lock list and fuzzy-matches names to room numbers.\n\n**Requires permission:** `doorlock:configure`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/finance/daily-summary": {
+      "get": {
+        "operationId": "getFinanceDailySummary",
+        "tags": [
+          "Finance & Billing"
+        ],
+        "summary": "Daily Summary (FI-03)",
+        "description": "`?date=YYYY-MM-DD`, defaults to today. Real aggregation of `folio_charges` by category and `payments` by method for the calendar day.\n\n**Requires permission:** `finance:read`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/finance/folios": {
+      "get": {
+        "operationId": "getFinanceFolios",
+        "tags": [
+          "Finance & Billing"
+        ],
+        "summary": "Folio Management list (FI-01)",
+        "description": "`?status=`, `?minBalance=true`, `?dateFrom=`/`?dateTo=` filters.\n\n**Requires permission:** `folio:read`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/finance/folios/{id}/dispute": {
+      "post": {
+        "operationId": "postFinanceFoliosByIdDispute",
+        "tags": [
+          "Finance & Billing"
+        ],
+        "summary": "Toggle a folio's disputed flag",
+        "description": "**Requires permission:** `folio:write`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "disputed"
+                ],
+                "properties": {
+                  "disputed": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/guest-messages/in-house": {
+      "get": {
+        "operationId": "getGuestMessagesInHouse",
+        "tags": [
+          "Guest Messaging"
+        ],
+        "summary": "In-house guest picker for starting a conversation (CO-02)",
+        "description": "**Requires permission:** `guests:message`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/guest-messages/threads": {
+      "get": {
+        "operationId": "getGuestMessagesThreads",
+        "tags": [
+          "Guest Messaging"
+        ],
+        "summary": "Every guest conversation thread for the branch",
+        "description": "Newest activity first, real last-message preview, flags whether the guest is currently in-house.\n\n**Requires permission:** `guests:message`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/guest-messages/threads/{guestId}": {
+      "get": {
+        "operationId": "getGuestMessagesThreadsByGuestId",
+        "tags": [
+          "Guest Messaging"
+        ],
+        "summary": "Thread detail + full message history",
+        "description": "Lazily creates an empty thread on first access if this guest has never been messaged.\n\n**Requires permission:** `guests:message`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "guestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/guest-messages/threads/{guestId}/escalate": {
+      "post": {
+        "operationId": "postGuestMessagesThreadsByGuestIdEscalate",
+        "tags": [
+          "Guest Messaging"
+        ],
+        "summary": "Escalate a thread to management",
+        "description": "Posts a real message into a real DM with every Manager/ORG at the branch, reusing Internal Chat rather than a separate inbox.\n\n**Requires permission:** `guests:message`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "guestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/guest-messages/threads/{guestId}/forward": {
+      "post": {
+        "operationId": "postGuestMessagesThreadsByGuestIdForward",
+        "tags": [
+          "Guest Messaging"
+        ],
+        "summary": "Forward a thread to a department",
+        "description": "Posts a real message into that department's actual Internal Chat channel (auto-created if the branch doesn't have one yet) — the receiving team sees it where they already look.\n\n**Requires permission:** `guests:message`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "guestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "department"
+                ],
+                "properties": {
+                  "department": {
+                    "type": "string",
+                    "enum": [
+                      "Front Desk",
+                      "Housekeeping",
+                      "Maintenance",
+                      "Restaurant"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/guest-messages/threads/{guestId}/messages": {
+      "post": {
+        "operationId": "postGuestMessagesThreadsByGuestIdMessages",
+        "tags": [
+          "Guest Messaging"
+        ],
+        "summary": "Log a guest communication",
+        "description": "This is a real communication *log*, not a WhatsApp/SMS send — `channel` records how the real-world conversation happened, it doesn't trigger delivery. See the module description.\n\n**Requires permission:** `guests:message`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "guestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "channel",
+                  "direction",
+                  "body"
+                ],
+                "properties": {
+                  "channel": {
+                    "type": "string",
+                    "enum": [
+                      "whatsapp",
+                      "sms",
+                      "internal"
+                    ]
+                  },
+                  "direction": {
+                    "type": "string",
+                    "enum": [
+                      "to_guest",
+                      "from_guest"
+                    ]
+                  },
+                  "body": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/guest-messages/threads/{guestId}/resolve": {
+      "post": {
+        "operationId": "postGuestMessagesThreadsByGuestIdResolve",
+        "tags": [
+          "Guest Messaging"
+        ],
+        "summary": "Mark a guest thread resolved",
+        "description": "**Requires permission:** `guests:message`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "guestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/guests": {
+      "get": {
+        "operationId": "getGuests",
+        "tags": [
+          "Guests"
+        ],
+        "summary": "Search guests",
+        "description": "`?search=` matches first name, last name, or phone. No `search` param returns the branch's most recent 20 guests.\n\n**Requires authentication** (any role).",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postGuests",
+        "tags": [
+          "Guests"
+        ],
+        "summary": "Create a guest profile",
+        "description": "FD-04 inline guest creation.\n\n**Requires permission:** `guests:create`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "firstName",
+                  "lastName"
+                ],
+                "properties": {
+                  "firstName": {
+                    "type": "string"
+                  },
+                  "lastName": {
+                    "type": "string"
+                  },
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "phone": {
+                    "type": "string"
+                  },
+                  "idType": {
+                    "type": "string"
+                  },
+                  "idNumber": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/housekeeping/inspections": {
+      "get": {
+        "operationId": "getHousekeepingInspections",
+        "tags": [
+          "Housekeeping"
+        ],
+        "summary": "Inspection log (HK-04)",
+        "description": "**Requires authentication** (any role).",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postHousekeepingInspections",
+        "tags": [
+          "Housekeeping"
+        ],
+        "summary": "Record a room inspection",
+        "description": "`pass` releases the room to `inspected`; `fail` sends it back to `dirty` for re-cleaning.\n\n**Requires permission:** `housekeeping:inspect`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "roomId",
+                  "result"
+                ],
+                "properties": {
+                  "roomId": {
+                    "type": "string"
+                  },
+                  "result": {
+                    "type": "string",
+                    "enum": [
+                      "pass",
+                      "fail"
+                    ]
+                  },
+                  "notes": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/housekeeping/rooms": {
+      "get": {
+        "operationId": "getHousekeepingRooms",
+        "tags": [
+          "Housekeeping"
+        ],
+        "summary": "Housekeeping board (HK-01)",
+        "description": "**Requires authentication** (any role).",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        }
+      }
+    },
+    "/housekeeping/rooms/{id}/assign": {
+      "post": {
+        "operationId": "postHousekeepingRoomsByIdAssign",
+        "tags": [
+          "Housekeeping"
+        ],
+        "summary": "Assign an attendant to a room",
+        "description": "**Requires permission:** `housekeeping:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "attendantId"
+                ],
+                "properties": {
+                  "attendantId": {
+                    "type": "string",
+                    "nullable": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/housekeeping/rooms/{id}/status": {
+      "post": {
+        "operationId": "postHousekeepingRoomsByIdStatus",
+        "tags": [
+          "Housekeeping"
+        ],
+        "summary": "Update a room's housekeeping status",
+        "description": "**Requires permission:** `housekeeping:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "status"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "dirty",
+                      "in_progress",
+                      "clean",
+                      "inspected"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/hr/attendance": {
+      "get": {
+        "operationId": "getHrAttendance",
+        "tags": [
+          "HR & Staff"
+        ],
+        "summary": "Attendance (HR-04)",
+        "description": "`?start=`/`?end=`, defaults to the last 7 days. Includes pending leave requests.\n\n**Requires permission:** `hr:payroll`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postHrAttendance",
+        "tags": [
+          "HR & Staff"
+        ],
+        "summary": "Record an attendance entry",
+        "description": "**Requires permission:** `hr:payroll`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "userId",
+                  "date",
+                  "status"
+                ],
+                "properties": {
+                  "userId": {
+                    "type": "string"
+                  },
+                  "date": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "present",
+                      "absent",
+                      "late",
+                      "leave"
+                    ]
+                  },
+                  "notes": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/hr/leave-requests": {
+      "post": {
+        "operationId": "postHrLeaveRequests",
+        "tags": [
+          "HR & Staff"
+        ],
+        "summary": "Record a leave request",
+        "description": "Manager-recorded, not staff self-service — Blueprint's HR module list only specs 'record manual entry / approve.'\n\n**Requires permission:** `hr:payroll`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "userId",
+                  "startDate",
+                  "endDate"
+                ],
+                "properties": {
+                  "userId": {
+                    "type": "string"
+                  },
+                  "startDate": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "endDate": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/hr/leave-requests/{id}/decide": {
+      "post": {
+        "operationId": "postHrLeaveRequestsByIdDecide",
+        "tags": [
+          "HR & Staff"
+        ],
+        "summary": "Approve or reject a leave request",
+        "description": "Approval cascades into real `attendance` rows (status `leave`) for every date in the range.\n\n**Requires permission:** `hr:payroll`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "decision"
+                ],
+                "properties": {
+                  "decision": {
+                    "type": "string",
+                    "enum": [
+                      "approved",
+                      "rejected"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/hr/payroll": {
+      "get": {
+        "operationId": "getHrPayroll",
+        "tags": [
+          "HR & Staff"
+        ],
+        "summary": "Payroll Summary (HR-06)",
+        "description": "`?period=YYYY-MM`, defaults to the current month. Deducts a prorated daily rate for unapproved absences; no overtime/tax/benefits modeling.\n\n**Requires permission:** `hr:payroll`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/hr/roles": {
+      "get": {
+        "operationId": "getHrRoles",
+        "tags": [
+          "HR & Staff"
+        ],
+        "summary": "List roles (HR-03)",
+        "description": "Includes real live user counts and permission counts per role.\n\n**Requires permission:** `roles:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postHrRoles",
+        "tags": [
+          "HR & Staff"
+        ],
+        "summary": "Create a custom role (HR-03)",
+        "description": "Custom roles start with an empty permission set (`isSystemRole: false`) — pick permissions afterward via the permissions endpoint below.\n\n**Requires permission:** `roles:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "permissions": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Optional at creation; validated against the real permission key catalog."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/hr/roles/{id}": {
+      "delete": {
+        "operationId": "deleteHrRolesById",
+        "tags": [
+          "HR & Staff"
+        ],
+        "summary": "Delete a custom role",
+        "description": "Refuses with `400` for a built-in role, or `409 ROLE_IN_USE` if any staff member is still assigned to it.\n\n**Requires permission:** `roles:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      },
+      "get": {
+        "operationId": "getHrRolesById",
+        "tags": [
+          "HR & Staff"
+        ],
+        "summary": "Role detail — the permission matrix (HR-03)",
+        "description": "Returns the role's current permissions, the full permission catalog for rendering the toggle matrix, and every user currently assigned this role.\n\n**Requires permission:** `roles:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/hr/roles/{id}/permissions": {
+      "post": {
+        "operationId": "postHrRolesByIdPermissions",
+        "tags": [
+          "HR & Staff"
+        ],
+        "summary": "Edit a role's permissions — built-in or custom (HR-03)",
+        "description": "Real, live consequence: every active session held by a user with this role is invalidated on its very next request (the `permissions_hash` embedded in their JWT stops matching).\n\n**Requires permission:** `roles:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "permissions"
+                ],
+                "properties": {
+                  "permissions": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "*"
+                        ]
+                      },
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/hr/shifts": {
+      "get": {
+        "operationId": "getHrShifts",
+        "tags": [
+          "HR & Staff"
+        ],
+        "summary": "Shift Scheduler (HR-05)",
+        "description": "`?start=`/`?end=`, defaults to the next 7 days.\n\n**Requires permission:** `hr:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postHrShifts",
+        "tags": [
+          "HR & Staff"
+        ],
+        "summary": "Set a staff member's shift for a date",
+        "description": "Upsert — overwrites any existing shift for that (staff, date) pair.\n\n**Requires permission:** `hr:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "userId",
+                  "date",
+                  "shiftType"
+                ],
+                "properties": {
+                  "userId": {
+                    "type": "string"
+                  },
+                  "date": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "shiftType": {
+                    "type": "string",
+                    "enum": [
+                      "Morning",
+                      "Evening",
+                      "Night",
+                      "Off"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/hr/shifts/clone": {
+      "post": {
+        "operationId": "postHrShiftsClone",
+        "tags": [
+          "HR & Staff"
+        ],
+        "summary": "Clone a week's shift pattern to a new week",
+        "description": "**Requires permission:** `hr:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "fromStart",
+                  "toStart"
+                ],
+                "properties": {
+                  "fromStart": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "toStart": {
+                    "type": "string",
+                    "format": "date"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/hr/shifts/publish": {
+      "post": {
+        "operationId": "postHrShiftsPublish",
+        "tags": [
+          "HR & Staff"
+        ],
+        "summary": "Publish all draft shifts in a date range",
+        "description": "**Requires permission:** `hr:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "start",
+                  "end"
+                ],
+                "properties": {
+                  "start": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "end": {
+                    "type": "string",
+                    "format": "date"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/hr/staff": {
+      "get": {
+        "operationId": "getHrStaff",
+        "tags": [
+          "HR & Staff"
+        ],
+        "summary": "Staff Directory (HR-01)",
+        "description": "`?department=`, `?status=` filters.\n\n**Requires permission:** `hr:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postHrStaff",
+        "tags": [
+          "HR & Staff"
+        ],
+        "summary": "Create a staff member (HR-01)",
+        "description": "Returns a one-time temp password for the manager to relay. `role` must be a real, existing role id (built-in or custom, HR-03) -- validated against the live `roles` table, not a hardcoded enum.\n\n**Requires permission:** `hr:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email",
+                  "firstName",
+                  "lastName",
+                  "role",
+                  "department"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "firstName": {
+                    "type": "string"
+                  },
+                  "lastName": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "type": "string"
+                  },
+                  "department": {
+                    "type": "string"
+                  },
+                  "phone": {
+                    "type": "string"
+                  },
+                  "payRate": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "contractType": {
+                    "type": "string",
+                    "enum": [
+                      "Full-time",
+                      "Part-time",
+                      "Contract"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/hr/staff/{id}": {
+      "get": {
+        "operationId": "getHrStaffById",
+        "tags": [
+          "HR & Staff"
+        ],
+        "summary": "Staff Profile Detail (HR-02)",
+        "description": "Notes are only included in the response for viewers with `hr:manage`; a staff member viewing their own profile without that permission gets the rest of the profile but an empty notes array.\n\n**Requires authentication** (any role).",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        }
+      }
+    },
+    "/hr/staff/{id}/deactivate": {
+      "post": {
+        "operationId": "postHrStaffByIdDeactivate",
+        "tags": [
+          "HR & Staff"
+        ],
+        "summary": "Deactivate a staff account",
+        "description": "**Requires permission:** `hr:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/hr/staff/{id}/notes": {
+      "post": {
+        "operationId": "postHrStaffByIdNotes",
+        "tags": [
+          "HR & Staff"
+        ],
+        "summary": "Add a management note to a staff profile",
+        "description": "**Requires permission:** `hr:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "note"
+                ],
+                "properties": {
+                  "note": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/hr/staff/{id}/pay-rate": {
+      "post": {
+        "operationId": "postHrStaffByIdPayRate",
+        "tags": [
+          "HR & Staff"
+        ],
+        "summary": "Adjust a staff member's pay rate",
+        "description": "**Requires permission:** `hr:payroll`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "payRate"
+                ],
+                "properties": {
+                  "payRate": {
+                    "type": "number",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/hr/staff/{id}/reset-password": {
+      "post": {
+        "operationId": "postHrStaffByIdResetPassword",
+        "tags": [
+          "HR & Staff"
+        ],
+        "summary": "Reset a staff member's password",
+        "description": "Returns a one-time temp password.\n\n**Requires permission:** `hr:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/hr/staff/{id}/update": {
+      "post": {
+        "operationId": "postHrStaffByIdUpdate",
+        "tags": [
+          "HR & Staff"
+        ],
+        "summary": "Edit a staff profile",
+        "description": "**Requires permission:** `hr:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "department": {
+                    "type": "string"
+                  },
+                  "phone": {
+                    "type": "string"
+                  },
+                  "emergencyContactName": {
+                    "type": "string"
+                  },
+                  "emergencyContactPhone": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "type": "string"
+                  },
+                  "contractType": {
+                    "type": "string",
+                    "enum": [
+                      "Full-time",
+                      "Part-time",
+                      "Contract"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/inventory/dashboard": {
+      "get": {
+        "operationId": "getInventoryDashboard",
+        "tags": [
+          "Inventory"
+        ],
+        "summary": "Stock Dashboard (IV-01)",
+        "description": "Low-stock count, total inventory value, and the 10 most recent transactions.\n\n**Requires permission:** `inventory:read`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/inventory/products": {
+      "get": {
+        "operationId": "getInventoryProducts",
+        "tags": [
+          "Inventory"
+        ],
+        "summary": "Product list (IV-02)",
+        "description": "`?category=` also backs HK-06 Linen & Supplies as a filtered view of the same data.\n\n**Requires permission:** `inventory:read`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postInventoryProducts",
+        "tags": [
+          "Inventory"
+        ],
+        "summary": "Create a product",
+        "description": "**Requires permission:** `inventory:write`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "itemCode",
+                  "name",
+                  "category",
+                  "unit",
+                  "parLevel",
+                  "reorderThreshold",
+                  "unitCost"
+                ],
+                "properties": {
+                  "itemCode": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "category": {
+                    "type": "string"
+                  },
+                  "unit": {
+                    "type": "string"
+                  },
+                  "parLevel": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "reorderThreshold": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "unitCost": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "location": {
+                    "type": "string"
+                  },
+                  "initialStock": {
+                    "type": "number",
+                    "minimum": 0,
+                    "default": 0
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/inventory/products/{id}/adjust": {
+      "post": {
+        "operationId": "postInventoryProductsByIdAdjust",
+        "tags": [
+          "Inventory"
+        ],
+        "summary": "Adjust stock (IV-02 count adjust / IV-04 manual transaction)",
+        "description": "One endpoint backs both UI entry points. `in`/`out` are a relative delta; `adjustment` sets the absolute new count. Every call posts a real `stock_transactions` row -- this *is* the audit trail for stock, nothing else duplicates it.\n\n**Requires permission:** `inventory:write`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "type",
+                  "quantity"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "in",
+                      "out",
+                      "adjustment"
+                    ]
+                  },
+                  "quantity": {
+                    "type": "number"
+                  },
+                  "reference": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/inventory/products/{id}/transactions": {
+      "get": {
+        "operationId": "getInventoryProductsByIdTransactions",
+        "tags": [
+          "Inventory"
+        ],
+        "summary": "Stock transaction history for one product",
+        "description": "**Requires permission:** `inventory:read`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/inventory/purchase-orders": {
+      "get": {
+        "operationId": "getInventoryPurchaseOrders",
+        "tags": [
+          "Inventory"
+        ],
+        "summary": "Purchase Order list (IV-05)",
+        "description": "**Requires permission:** `purchasing:orders`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postInventoryPurchaseOrders",
+        "tags": [
+          "Inventory"
+        ],
+        "summary": "Create a purchase order",
+        "description": "**Requires permission:** `purchasing:orders`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "supplierId",
+                  "items"
+                ],
+                "properties": {
+                  "supplierId": {
+                    "type": "string"
+                  },
+                  "items": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "productId",
+                        "quantity",
+                        "unitCost"
+                      ],
+                      "properties": {
+                        "productId": {
+                          "type": "string"
+                        },
+                        "quantity": {
+                          "type": "number",
+                          "minimum": 0,
+                          "exclusiveMinimum": true
+                        },
+                        "unitCost": {
+                          "type": "number",
+                          "minimum": 0
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/inventory/purchase-orders/{id}": {
+      "get": {
+        "operationId": "getInventoryPurchaseOrdersById",
+        "tags": [
+          "Inventory"
+        ],
+        "summary": "Purchase order detail with line items",
+        "description": "**Requires permission:** `purchasing:orders`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/inventory/purchase-orders/{id}/cancel": {
+      "post": {
+        "operationId": "postInventoryPurchaseOrdersByIdCancel",
+        "tags": [
+          "Inventory"
+        ],
+        "summary": "Cancel a purchase order",
+        "description": "Refuses with `409 ALREADY_RECEIVED` once received.\n\n**Requires permission:** `purchasing:orders`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/inventory/purchase-orders/{id}/receive": {
+      "post": {
+        "operationId": "postInventoryPurchaseOrdersByIdReceive",
+        "tags": [
+          "Inventory"
+        ],
+        "summary": "Mark PO received",
+        "description": "Requires status `sent`. Posts a real `in` stock transaction for every line item and bumps `products.currentStock` — the actual mechanism behind 'triggers stock transaction auto-entry'.\n\n**Requires permission:** `purchasing:orders`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/inventory/purchase-orders/{id}/send": {
+      "post": {
+        "operationId": "postInventoryPurchaseOrdersByIdSend",
+        "tags": [
+          "Inventory"
+        ],
+        "summary": "Mark PO sent to supplier",
+        "description": "Requires status `draft`.\n\n**Requires permission:** `purchasing:orders`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/inventory/suppliers": {
+      "get": {
+        "operationId": "getInventorySuppliers",
+        "tags": [
+          "Inventory"
+        ],
+        "summary": "Supplier list (IV-03)",
+        "description": "**Requires permission:** `purchasing:suppliers`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postInventorySuppliers",
+        "tags": [
+          "Inventory"
+        ],
+        "summary": "Create a supplier",
+        "description": "**Requires permission:** `purchasing:suppliers`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "contact": {
+                    "type": "string"
+                  },
+                  "phone": {
+                    "type": "string"
+                  },
+                  "category": {
+                    "type": "string"
+                  },
+                  "paymentTerms": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/inventory/transactions": {
+      "get": {
+        "operationId": "getInventoryTransactions",
+        "tags": [
+          "Inventory"
+        ],
+        "summary": "Stock Transactions, all products (IV-04)",
+        "description": "**Requires permission:** `inventory:read`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/lost-found": {
+      "get": {
+        "operationId": "getLostFound",
+        "tags": [
+          "Lost & Found"
+        ],
+        "summary": "Lost & Found log (HK-05)",
+        "description": "**Requires authentication** (any role).",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postLostFound",
+        "tags": [
+          "Lost & Found"
+        ],
+        "summary": "Log a found item",
+        "description": "**Requires permission:** `frontoffice:lostfound`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "description"
+                ],
+                "properties": {
+                  "description": {
+                    "type": "string"
+                  },
+                  "locationFound": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/lost-found/{id}/claim": {
+      "post": {
+        "operationId": "postLostFoundByIdClaim",
+        "tags": [
+          "Lost & Found"
+        ],
+        "summary": "Mark an item claimed",
+        "description": "**Requires permission:** `frontoffice:lostfound`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "claimedBy"
+                ],
+                "properties": {
+                  "claimedBy": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/lost-found/{id}/dispose": {
+      "post": {
+        "operationId": "postLostFoundByIdDispose",
+        "tags": [
+          "Lost & Found"
+        ],
+        "summary": "Dispose of an unclaimed item",
+        "description": "**Requires permission:** `frontoffice:lostfound`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reason"
+                ],
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/maintenance/work-orders": {
+      "get": {
+        "operationId": "getMaintenanceWorkOrders",
+        "tags": [
+          "Maintenance"
+        ],
+        "summary": "Work order list (MX-01)",
+        "description": "**Requires authentication** (any role).",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postMaintenanceWorkOrders",
+        "tags": [
+          "Maintenance"
+        ],
+        "summary": "Report an issue (MX-03)",
+        "description": "Open to any authenticated role, not just Maintenance -- Blueprint specs this as 'all roles with reporting access'.\n\n**Requires authentication** (any role).",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "location",
+                  "category",
+                  "priority",
+                  "description"
+                ],
+                "properties": {
+                  "location": {
+                    "type": "string"
+                  },
+                  "category": {
+                    "type": "string"
+                  },
+                  "priority": {
+                    "type": "string",
+                    "enum": [
+                      "low",
+                      "medium",
+                      "high"
+                    ]
+                  },
+                  "description": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        }
+      }
+    },
+    "/maintenance/work-orders/{id}": {
+      "get": {
+        "operationId": "getMaintenanceWorkOrdersById",
+        "tags": [
+          "Maintenance"
+        ],
+        "summary": "Work order detail (MX-02)",
+        "description": "Includes the full real event timeline (created/assigned/status-changed/notes).\n\n**Requires authentication** (any role).",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        }
+      }
+    },
+    "/maintenance/work-orders/{id}/assign": {
+      "post": {
+        "operationId": "postMaintenanceWorkOrdersByIdAssign",
+        "tags": [
+          "Maintenance"
+        ],
+        "summary": "Assign a technician",
+        "description": "**Requires permission:** `maintenance:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "technicianId"
+                ],
+                "properties": {
+                  "technicianId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/maintenance/work-orders/{id}/notes": {
+      "post": {
+        "operationId": "postMaintenanceWorkOrdersByIdNotes",
+        "tags": [
+          "Maintenance"
+        ],
+        "summary": "Add a work order note",
+        "description": "**Requires permission:** `maintenance:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "note"
+                ],
+                "properties": {
+                  "note": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/maintenance/work-orders/{id}/status": {
+      "post": {
+        "operationId": "postMaintenanceWorkOrdersByIdStatus",
+        "tags": [
+          "Maintenance"
+        ],
+        "summary": "Advance work order status",
+        "description": "**Requires permission:** `maintenance:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "status"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "reported",
+                      "assigned",
+                      "in_progress",
+                      "completed"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/reports/department": {
+      "get": {
+        "operationId": "getReportsDepartment",
+        "tags": [
+          "Reports"
+        ],
+        "summary": "Department Report (RP-03)",
+        "description": "Open to any authenticated role — no permission gate, matches every other 'own numbers' view.\n\n**Requires authentication** (any role).",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        }
+      }
+    },
+    "/reports/guest-analytics": {
+      "get": {
+        "operationId": "getReportsGuestAnalytics",
+        "tags": [
+          "Reports"
+        ],
+        "summary": "Guest Analytics (RP-04)",
+        "description": "Includes real month-bucketed repeat-vs-new guest computation over a 6-month lookback window.\n\n**Requires permission:** `reports:guests`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/reports/inventory": {
+      "get": {
+        "operationId": "getReportsInventory",
+        "tags": [
+          "Reports"
+        ],
+        "summary": "Inventory Report (RP-05)",
+        "description": "**Requires permission:** `reports:inventory`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/reports/occupancy": {
+      "get": {
+        "operationId": "getReportsOccupancy",
+        "tags": [
+          "Reports"
+        ],
+        "summary": "Occupancy Report (RP-01)",
+        "description": "**Requires permission:** `reports:occupancy`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/reports/revenue": {
+      "get": {
+        "operationId": "getReportsRevenue",
+        "tags": [
+          "Reports"
+        ],
+        "summary": "Revenue Report (RP-02)",
+        "description": "**Requires permission:** `reports:revenue`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/reports/staff": {
+      "get": {
+        "operationId": "getReportsStaff",
+        "tags": [
+          "Reports"
+        ],
+        "summary": "Staff Performance Report (RP-06)",
+        "description": "**Requires permission:** `reports:staff`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/reservations": {
+      "get": {
+        "operationId": "getReservations",
+        "tags": [
+          "Reservations"
+        ],
+        "summary": "Reservation grid",
+        "description": "Every non-cancelled reservation for the branch, joined with guest name and room number.\n\n**Requires authentication** (any role).",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postReservations",
+        "tags": [
+          "Reservations"
+        ],
+        "summary": "Create a reservation (R-02)",
+        "description": "Either `guestId` (existing guest) or `newGuest` (creates one inline) is required, not both. Rejects with `409 ROOM_CONFLICT` if the room is already booked for an overlapping date range.\n\n**Requires permission:** `reservations:create`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "checkInDate",
+                  "checkOutDate",
+                  "rate"
+                ],
+                "properties": {
+                  "guestId": {
+                    "type": "string"
+                  },
+                  "newGuest": {
+                    "type": "object",
+                    "properties": {
+                      "firstName": {
+                        "type": "string"
+                      },
+                      "lastName": {
+                        "type": "string"
+                      },
+                      "email": {
+                        "type": "string"
+                      },
+                      "phone": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "roomId": {
+                    "type": "string"
+                  },
+                  "checkInDate": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "checkOutDate": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "rate": {
+                    "type": "number",
+                    "minimum": 0,
+                    "exclusiveMinimum": true
+                  },
+                  "adults": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "default": 1
+                  },
+                  "children": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 0
+                  },
+                  "specialRequests": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/reservations/{id}": {
+      "get": {
+        "operationId": "getReservationsById",
+        "tags": [
+          "Reservations"
+        ],
+        "summary": "Reservation detail",
+        "description": "Includes guest, room, and a computed real-time folio summary.\n\n**Requires authentication** (any role).",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        }
+      }
+    },
+    "/reservations/{id}/check-in": {
+      "post": {
+        "operationId": "postReservationsByIdCheckIn",
+        "tags": [
+          "Reservations"
+        ],
+        "summary": "Check in (FD-01 step 6)",
+        "description": "Refuses with `409 ROOM_NOT_CLEAN` unless the room's housekeeping status is `clean` or `inspected` (HK-01 genuinely gates Front Desk). Posts the room-rate line item to the folio for real.\n\n**Requires permission:** `reservations:checkinout`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "roomId": {
+                    "type": "string",
+                    "description": "Overrides the reservation's currently-assigned room, if any."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/reservations/{id}/check-out": {
+      "post": {
+        "operationId": "postReservationsByIdCheckOut",
+        "tags": [
+          "Reservations"
+        ],
+        "summary": "Settle & release room (FD-02)",
+        "description": "Refuses with `409 BALANCE_REMAINING` while the folio balance is above zero. On success, room goes to `cleaning`/`dirty` for Housekeeping to pick up, and real door-lock credentials are revoked (Blueprint 6.9).\n\n**Requires permission:** `reservations:checkinout`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "paymentAmount": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "paymentMethod": {
+                    "type": "string",
+                    "enum": [
+                      "cash",
+                      "card",
+                      "transfer"
+                    ],
+                    "description": "Required if paymentAmount > 0."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/reservations/{id}/folio/charges": {
+      "post": {
+        "operationId": "postReservationsByIdFolioCharges",
+        "tags": [
+          "Reservations"
+        ],
+        "summary": "Post a manual folio charge (FD-10)",
+        "description": "**Requires permission:** `folio:postcharge`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "category",
+                  "description",
+                  "unitPrice"
+                ],
+                "properties": {
+                  "category": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "quantity": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "default": 1
+                  },
+                  "unitPrice": {
+                    "type": "number",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/restaurant/menu": {
+      "get": {
+        "operationId": "getRestaurantMenu",
+        "tags": [
+          "Restaurant / POS"
+        ],
+        "summary": "Menu, grouped by category",
+        "description": "**Requires authentication** (any role).",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        }
+      }
+    },
+    "/restaurant/menu/categories": {
+      "post": {
+        "operationId": "postRestaurantMenuCategories",
+        "tags": [
+          "Restaurant / POS"
+        ],
+        "summary": "Create a menu category",
+        "description": "**Requires permission:** `restaurant:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/restaurant/menu/items": {
+      "post": {
+        "operationId": "postRestaurantMenuItems",
+        "tags": [
+          "Restaurant / POS"
+        ],
+        "summary": "Create a menu item",
+        "description": "**Requires permission:** `restaurant:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "categoryId",
+                  "name",
+                  "price"
+                ],
+                "properties": {
+                  "categoryId": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "price": {
+                    "type": "number",
+                    "minimum": 0,
+                    "exclusiveMinimum": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/restaurant/menu/items/{id}/availability": {
+      "post": {
+        "operationId": "postRestaurantMenuItemsByIdAvailability",
+        "tags": [
+          "Restaurant / POS"
+        ],
+        "summary": "86 / re-enable a menu item",
+        "description": "**Requires permission:** `restaurant:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "available"
+                ],
+                "properties": {
+                  "available": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/restaurant/orders": {
+      "get": {
+        "operationId": "getRestaurantOrders",
+        "tags": [
+          "Restaurant / POS"
+        ],
+        "summary": "Order list",
+        "description": "`?status=` filters (e.g. `open`, `sent_to_kitchen`, `served`, `closed`).\n\n**Requires permission:** `restaurant:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postRestaurantOrders",
+        "tags": [
+          "Restaurant / POS"
+        ],
+        "summary": "Open an order (POS or Room Service)",
+        "description": "Exactly one of `tableId` (POS) or `roomReservationId` (RT-06 room service) is required -- rejects with `400 INVALID_INPUT` if both or neither are set.\n\n**Requires permission:** `restaurant:operate`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "tableId": {
+                    "type": "string"
+                  },
+                  "roomReservationId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/restaurant/orders/{id}": {
+      "get": {
+        "operationId": "getRestaurantOrdersById",
+        "tags": [
+          "Restaurant / POS"
+        ],
+        "summary": "Order detail with items and running total",
+        "description": "**Requires permission:** `restaurant:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/restaurant/orders/{id}/close": {
+      "post": {
+        "operationId": "postRestaurantOrdersByIdClose",
+        "tags": [
+          "Restaurant / POS"
+        ],
+        "summary": "Close an order — post to room or take payment",
+        "description": "`postToRoom: true` posts the total as a real folio charge on the linked reservation (refuses if the guest isn't checked in); otherwise `paymentMethod` is required.\n\n**Requires permission:** `restaurant:operate`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "postToRoom"
+                ],
+                "properties": {
+                  "postToRoom": {
+                    "type": "boolean"
+                  },
+                  "paymentMethod": {
+                    "type": "string",
+                    "enum": [
+                      "cash",
+                      "card",
+                      "transfer"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/restaurant/orders/{id}/items": {
+      "post": {
+        "operationId": "postRestaurantOrdersByIdItems",
+        "tags": [
+          "Restaurant / POS"
+        ],
+        "summary": "Add an item to an open order",
+        "description": "**Requires permission:** `restaurant:operate`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "menuItemId"
+                ],
+                "properties": {
+                  "menuItemId": {
+                    "type": "string"
+                  },
+                  "quantity": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "default": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/restaurant/orders/{id}/items/{itemId}/status": {
+      "post": {
+        "operationId": "postRestaurantOrdersByIdItemsByItemIdStatus",
+        "tags": [
+          "Restaurant / POS"
+        ],
+        "summary": "Update a single item's kitchen status (RT-02 KDS)",
+        "description": "**Requires permission:** `restaurant:operate`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "itemId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "status"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "pending",
+                      "ready",
+                      "served"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/restaurant/orders/{id}/send-to-kitchen": {
+      "post": {
+        "operationId": "postRestaurantOrdersByIdSendToKitchen",
+        "tags": [
+          "Restaurant / POS"
+        ],
+        "summary": "Send order to the kitchen display",
+        "description": "**Requires permission:** `restaurant:operate`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/restaurant/room-charges": {
+      "get": {
+        "operationId": "getRestaurantRoomCharges",
+        "tags": [
+          "Restaurant / POS"
+        ],
+        "summary": "Guest Room Charges (RT-07)",
+        "description": "Restaurant-category folio charges only, read from the same `folio_charges` table Front Desk and Finance use.\n\n**Requires permission:** `folio:postcharge`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/restaurant/tables": {
+      "get": {
+        "operationId": "getRestaurantTables",
+        "tags": [
+          "Restaurant / POS"
+        ],
+        "summary": "Table Management board (RT-03)",
+        "description": "**Requires authentication** (any role).",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        }
+      }
+    },
+    "/restaurant/tables/{id}/status": {
+      "post": {
+        "operationId": "postRestaurantTablesByIdStatus",
+        "tags": [
+          "Restaurant / POS"
+        ],
+        "summary": "Update table status",
+        "description": "**Requires permission:** `restaurant:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "status"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "available",
+                      "occupied",
+                      "reserved",
+                      "dirty"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/rooms": {
+      "get": {
+        "operationId": "getRooms",
+        "tags": [
+          "Rooms"
+        ],
+        "summary": "List rooms for the branch",
+        "description": "**Requires authentication** (any role).",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        }
+      }
+    },
+    "/settings/branch": {
+      "get": {
+        "operationId": "getSettingsBranch",
+        "tags": [
+          "Settings"
+        ],
+        "summary": "Branch/property config (ST-01)",
+        "description": "Readable by any authenticated user — the sidebar needs `enabledModules` regardless of the viewer's role.\n\n**Requires authentication** (any role).",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postSettingsBranch",
+        "tags": [
+          "Settings"
+        ],
+        "summary": "Update branch/property settings",
+        "description": "**Requires permission:** `settings:branch`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "address": {
+                    "type": "string"
+                  },
+                  "contactPhone": {
+                    "type": "string"
+                  },
+                  "contactEmail": {
+                    "type": "string"
+                  },
+                  "checkInTime": {
+                    "type": "string"
+                  },
+                  "checkOutTime": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string"
+                  },
+                  "timezone": {
+                    "type": "string"
+                  },
+                  "taxName": {
+                    "type": "string"
+                  },
+                  "taxRate": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "taxInclusive": {
+                    "type": "boolean"
+                  },
+                  "rateRounding": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "discountApprovalThreshold": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "enabledModules": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "restaurant",
+                        "inventory",
+                        "multiBranch",
+                        "doorLock"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/settings/me": {
+      "get": {
+        "operationId": "getSettingsMe",
+        "tags": [
+          "Settings"
+        ],
+        "summary": "My Preferences (ST-03)",
+        "description": "**Requires authentication** (any role).",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postSettingsMe",
+        "tags": [
+          "Settings"
+        ],
+        "summary": "Update my preferences",
+        "description": "**Requires authentication** (any role).",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "language": {
+                    "type": "string"
+                  },
+                  "dateFormat": {
+                    "type": "string"
+                  },
+                  "timeFormat": {
+                    "type": "string",
+                    "enum": [
+                      "24h",
+                      "12h"
+                    ]
+                  },
+                  "notificationPrefs": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        }
+      }
+    },
+    "/shift-handovers": {
+      "get": {
+        "operationId": "getShiftHandovers",
+        "tags": [
+          "Shift Handover"
+        ],
+        "summary": "Shift Handover list (CO-04)",
+        "description": "**Requires permission:** `handover:use`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postShiftHandovers",
+        "tags": [
+          "Shift Handover"
+        ],
+        "summary": "Create a shift handover note",
+        "description": "**Requires permission:** `handover:use`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "shiftName"
+                ],
+                "properties": {
+                  "shiftName": {
+                    "type": "string"
+                  },
+                  "outstandingTasks": {
+                    "type": "string"
+                  },
+                  "vipGuests": {
+                    "type": "string"
+                  },
+                  "maintenanceIssues": {
+                    "type": "string"
+                  },
+                  "guestComplaints": {
+                    "type": "string"
+                  },
+                  "pendingPayments": {
+                    "type": "string"
+                  },
+                  "generalNotes": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/shift-handovers/{id}": {
+      "get": {
+        "operationId": "getShiftHandoversById",
+        "tags": [
+          "Shift Handover"
+        ],
+        "summary": "Shift handover detail",
+        "description": "**Requires permission:** `handover:use`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/shift-handovers/{id}/acknowledge": {
+      "post": {
+        "operationId": "postShiftHandoversByIdAcknowledge",
+        "tags": [
+          "Shift Handover"
+        ],
+        "summary": "Acknowledge a handover",
+        "description": "Refuses with `409 ALREADY_ACKNOWLEDGED` on a repeat call.\n\n**Requires permission:** `handover:use`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/sync/now": {
+      "post": {
+        "operationId": "postSyncNow",
+        "tags": [
+          "Sync"
+        ],
+        "summary": "Trigger an immediate sync push/pull",
+        "description": "Also triggers a real update-availability check against the registry as part of the pull.\n\n**Requires permission:** `admin:operations`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/sync/status": {
+      "get": {
+        "operationId": "getSyncStatus",
+        "tags": [
+          "Sync"
+        ],
+        "summary": "Sync & Deployment status (ST-02)",
+        "description": "Includes real deployment fields (current version, update channel, pending force-update/rollback) alongside push/pull sync state.\n\n**Requires permission:** `admin:operations`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/users": {
+      "get": {
+        "operationId": "getUsers",
+        "tags": [
+          "Users"
+        ],
+        "summary": "Branch staff list",
+        "description": "Lighter-weight than HR-01's Staff Directory — used for picker/assignment UI (e.g. assigning a housekeeper or technician).\n\n**Requires authentication** (any role).",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        }
+      }
+    }
+  }
+}

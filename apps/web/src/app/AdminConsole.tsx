@@ -62,7 +62,7 @@ function Stat({ label, value, sub, color }: { label: string; value: string; sub?
 // Auth doc 3.5: TOTP mandatory, no bypass. Three steps: password, then
 // either first-time enrollment (show secret, confirm a code) or plain
 // verification (just a code) depending on what /auth/admin/login reports.
-function AdminLogin({ onLoggedIn, onBack }: { onLoggedIn: (u: AdminUser) => void; onBack: () => void }) {
+function AdminLogin({ onLoggedIn, onBack }: { onLoggedIn: (u: AdminUser, ipRangeWarning?: boolean) => void; onBack: () => void }) {
   const [step, setStep] = useState<"credentials" | "enroll" | "verify">("credentials");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -100,8 +100,8 @@ function AdminLogin({ onLoggedIn, onBack }: { onLoggedIn: (u: AdminUser) => void
   const submitEnrollConfirm = async () => {
     setLoading(true); setError("");
     try {
-      const { user } = await adminAuthApi.mfaEnrollConfirm(code);
-      onLoggedIn(user);
+      const { user, ipRangeWarning } = await adminAuthApi.mfaEnrollConfirm(code);
+      onLoggedIn(user, ipRangeWarning);
     } catch (e) { setError(describeError(e, "Couldn't confirm MFA setup.")); }
     finally { setLoading(false); }
   };
@@ -109,8 +109,8 @@ function AdminLogin({ onLoggedIn, onBack }: { onLoggedIn: (u: AdminUser) => void
   const submitVerify = async () => {
     setLoading(true); setError("");
     try {
-      const { user } = await adminAuthApi.mfaVerify(code);
-      onLoggedIn(user);
+      const { user, ipRangeWarning } = await adminAuthApi.mfaVerify(code);
+      onLoggedIn(user, ipRangeWarning);
     } catch (e) { setError(describeError(e, "Couldn't verify code.")); }
     finally { setLoading(false); }
   };
@@ -184,6 +184,15 @@ export default function AdminConsole({ onLogout }: { onLogout: () => void }) {
   const [rollbackInputs, setRollbackInputs] = useState<Record<string, string>>({});
 
   useEffect(() => { adminAuthApi.me().then(setMe).catch(() => {}).finally(() => setCheckingSession(false)); }, []);
+
+  // Auth doc 3.5's session-to-IP-range binding: real, but flags rather than
+  // blocks (see central-server/src/auth/ipRanges.ts) -- surfaced here as a
+  // toast rather than silently swallowed, since a flagged login is exactly
+  // the kind of thing the Platform Owner should actually see.
+  const handleLoggedIn = (u: AdminUser, ipRangeWarning?: boolean) => {
+    setMe(u);
+    if (ipRangeWarning) showToast("⚠️ Signed in from an IP outside your configured allowed range — logged to the audit trail.");
+  };
 
   const loadData = () => {
     setLoadingData(true);
@@ -273,7 +282,7 @@ export default function AdminConsole({ onLogout }: { onLogout: () => void }) {
   };
 
   if (checkingSession) return <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: "#F0F4F8" }}><div className="text-sm" style={{ color: MUTED }}>Loading…</div></div>;
-  if (!me) return <AdminLogin onLoggedIn={setMe} onBack={onLogout} />;
+  if (!me) return <AdminLogin onLoggedIn={handleLoggedIn} onBack={onLogout} />;
   if (loadingData) return <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: "#F0F4F8" }}><div className="text-sm" style={{ color: MUTED }}>Loading platform data…</div></div>;
 
   const filteredOrgs = orgs.filter(o => !search || o.name.toLowerCase().includes(search.toLowerCase()));

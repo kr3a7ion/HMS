@@ -43,6 +43,21 @@ router.get("/channels", requireAuth, (req: AuthedRequest, res) => {
   res.json(withPreview);
 });
 
+// Shared with routes/guestMessages.ts -- escalating a guest thread posts a
+// real message into a real DM with the manager, reusing the same channel a
+// manager already monitors via Internal Chat, rather than a status flag
+// nobody would ever see.
+export function getOrCreateDmChannel(branchId: string, userAId: string, userBId: string): { id: string; created: boolean } {
+  const existing = db.select().from(chatChannels).where(and(
+    eq(chatChannels.branchId, branchId), eq(chatChannels.type, "dm"),
+    or(and(eq(chatChannels.userAId, userAId), eq(chatChannels.userBId, userBId)), and(eq(chatChannels.userAId, userBId), eq(chatChannels.userBId, userAId))),
+  )).get();
+  if (existing) return { id: existing.id, created: false };
+  const id = nanoid();
+  db.insert(chatChannels).values({ id, branchId, type: "dm", userAId, userBId, createdAt: new Date() }).run();
+  return { id, created: true };
+}
+
 const dmSchema = z.object({ otherUserId: z.string() });
 
 router.post("/dm", requireAuth, (req: AuthedRequest, res) => {
@@ -55,15 +70,8 @@ router.post("/dm", requireAuth, (req: AuthedRequest, res) => {
   const other = db.select().from(users).where(eq(users.id, otherUserId)).get();
   if (!other || other.branchId !== req.auth!.branchId) return res.status(400).json({ error: "USER_NOT_FOUND" });
 
-  const existing = db.select().from(chatChannels).where(and(
-    eq(chatChannels.branchId, req.auth!.branchId), eq(chatChannels.type, "dm"),
-    or(and(eq(chatChannels.userAId, userId), eq(chatChannels.userBId, otherUserId)), and(eq(chatChannels.userAId, otherUserId), eq(chatChannels.userBId, userId))),
-  )).get();
-  if (existing) return res.json({ id: existing.id });
-
-  const id = nanoid();
-  db.insert(chatChannels).values({ id, branchId: req.auth!.branchId, type: "dm", userAId: userId, userBId: otherUserId, createdAt: new Date() }).run();
-  res.status(201).json({ id });
+  const { id, created } = getOrCreateDmChannel(req.auth!.branchId, userId, otherUserId);
+  res.status(created ? 201 : 200).json({ id });
 });
 
 function canAccessChannel(channelId: string, branchId: string, userId: string) {

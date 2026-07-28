@@ -14,6 +14,7 @@ import { signOrgToken, signAdminToken, signAdminMfaPendingToken } from "../auth/
 import { requireOrgAuth, requireAdminAuth, requireAdminMfaPending, type OrgAuthedRequest, type AdminAuthedRequest, type AdminMfaPendingRequest } from "../auth/middleware.js";
 import { generateTotpSecret, totpOtpauthUrl, verifyTotp } from "../auth/totp.js";
 import { checkLockout, recordFailedAttempt, clearAttempts } from "../auth/loginRateLimit.js";
+import { isIpAllowed } from "../auth/ipRanges.js";
 import { logAudit } from "../services/audit.js";
 
 const router = Router();
@@ -23,6 +24,20 @@ const ADMIN_MFA_PENDING_MAX_AGE_MS = 5 * 60 * 1000;
 
 const loginSchema = z.object({ email: z.string().email(), password: z.string().min(1) });
 const codeSchema = z.object({ code: z.string().min(1) });
+
+// Auth doc 3.5's third security item -- see auth/ipRanges.ts for why this
+// flags rather than blocks. `null` means the feature isn't configured
+// (no PLATFORM_OWNER_ALLOWED_IP_RANGES set) -- nothing to flag, and the
+// caller's `ok:true` login response stays exactly as it was before this
+// existed. Called at both real session-issuance points (mfa/enroll/confirm
+// and mfa/verify), not at /admin/login, since that step only ever grants
+// a 5-minute MFA-pending token, never a real session.
+function flagIfOutsideAllowedRange(userId: string, ip: string | undefined): boolean {
+  const allowed = isIpAllowed(ip);
+  if (allowed === null || allowed) return false;
+  logAudit({ actorType: "admin", actorId: userId, action: "admin_login_ip_flagged", details: `Session granted from an IP outside the configured allowed range: ${ip ?? "unknown"}`, ipAddress: ip });
+  return true;
+}
 
 // ─── Org Super Admin (Org Portal, portal.nexura.app) ───────────────────────
 router.post("/org/login", async (req, res) => {
@@ -111,9 +126,10 @@ router.post("/admin/mfa/enroll/confirm", requireAdminMfaPending, (req: AdminMfaP
   const token = signAdminToken({ sub: user.id });
   res.clearCookie("central_mfa_pending_token");
   res.cookie("central_access_token", token, { httpOnly: true, sameSite: "strict", maxAge: ADMIN_TOKEN_MAX_AGE_MS });
+  const ipRangeWarning = flagIfOutsideAllowedRange(user.id, req.ip);
   logAudit({ actorType: "admin", actorId: user.id, action: "mfa_enrolled", ipAddress: req.ip });
   logAudit({ actorType: "admin", actorId: user.id, action: "login_success", ipAddress: req.ip });
-  res.json({ user: { id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName } });
+  res.json({ user: { id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName }, ipRangeWarning });
 });
 
 router.post("/admin/mfa/verify", requireAdminMfaPending, (req: AdminMfaPendingRequest, res) => {
@@ -137,8 +153,9 @@ router.post("/admin/mfa/verify", requireAdminMfaPending, (req: AdminMfaPendingRe
   const token = signAdminToken({ sub: user.id });
   res.clearCookie("central_mfa_pending_token");
   res.cookie("central_access_token", token, { httpOnly: true, sameSite: "strict", maxAge: ADMIN_TOKEN_MAX_AGE_MS });
+  const ipRangeWarning = flagIfOutsideAllowedRange(user.id, req.ip);
   logAudit({ actorType: "admin", actorId: user.id, action: "login_success", ipAddress: req.ip });
-  res.json({ user: { id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName } });
+  res.json({ user: { id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName }, ipRangeWarning });
 });
 
 router.post("/admin/logout", (_req, res) => { res.clearCookie("central_access_token"); res.json({ ok: true }); });

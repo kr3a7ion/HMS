@@ -204,6 +204,49 @@ export const chatApi = {
     api.post<{ id: string }>(`/chat/channels/${channelId}/messages`, { body, emergency }),
 };
 
+// ─── Guest Messaging (CO-02) — a real communication log, not a WhatsApp/SMS
+// sending gateway. See server/src/db/schema.ts's guestMessageThreads
+// comment for why: no third-party messaging account exists in this
+// codebase, and no guest-facing portal exists for an "internal" message to
+// actually be delivered to. `channel` records how the real conversation
+// happened (staff's own phone/WhatsApp, in person); this system threads
+// and coordinates around it for real.
+export type GuestMessageChannel = "whatsapp" | "sms" | "internal";
+export type GuestMessageDirection = "to_guest" | "from_guest";
+export type GuestThreadStatus = "open" | "forwarded" | "escalated" | "resolved";
+export interface InHouseGuestOption {
+  guestId: string; firstName: string; lastName: string; roomNumber: string | null; checkOutDate: string;
+}
+export interface GuestThreadSummary {
+  id: string; guestId: string; status: GuestThreadStatus; forwardedToDepartment: string | null;
+  escalatedAt: string | null; resolvedAt: string | null; lastMessageAt: string;
+  guestFirstName: string; guestLastName: string;
+  lastMessagePreview: string | null; lastMessageChannel: GuestMessageChannel | null;
+  roomNumber: string | null; inHouse: boolean;
+}
+export interface GuestMessageEntry {
+  id: string; channel: GuestMessageChannel; direction: GuestMessageDirection; body: string; createdAt: string;
+  loggedByFirstName: string | null; loggedByLastName: string | null;
+}
+export interface GuestThreadDetail {
+  id: string; guestId: string; status: GuestThreadStatus; forwardedToDepartment: string | null;
+  escalatedAt: string | null; resolvedAt: string | null;
+  guest: { id: string; firstName: string; lastName: string; vip: boolean; blacklisted: boolean };
+  roomNumber: string | null;
+  messages: GuestMessageEntry[];
+}
+
+export const guestMessagesApi = {
+  listInHouse: () => api.get<InHouseGuestOption[]>("/guest-messages/in-house"),
+  listThreads: () => api.get<GuestThreadSummary[]>("/guest-messages/threads"),
+  getThread: (guestId: string) => api.get<GuestThreadDetail>(`/guest-messages/threads/${guestId}`),
+  logMessage: (guestId: string, input: { channel: GuestMessageChannel; direction: GuestMessageDirection; body: string }) =>
+    api.post<{ id: string }>(`/guest-messages/threads/${guestId}/messages`, input),
+  forward: (guestId: string, department: string) => api.post<{ ok: true }>(`/guest-messages/threads/${guestId}/forward`, { department }),
+  escalate: (guestId: string) => api.post<{ ok: true; notifiedManagers: number }>(`/guest-messages/threads/${guestId}/escalate`),
+  resolve: (guestId: string) => api.post<{ ok: true }>(`/guest-messages/threads/${guestId}/resolve`),
+};
+
 export interface Announcement {
   id: string; title: string; body: string; targetAudience: string;
   expiresAt: string | null; archived: boolean; createdAt: string;

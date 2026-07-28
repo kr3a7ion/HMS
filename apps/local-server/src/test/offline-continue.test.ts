@@ -54,7 +54,10 @@ before(async () => {
 });
 
 after(async () => {
-  await new Promise<void>(resolve => server.close(() => resolve()));
+  await new Promise<void>(resolve => {
+    server.close(() => resolve());
+    server.closeAllConnections();
+  });
   // Windows won't allow deleting a file that's still open (unlike
   // POSIX, where unlinking an open file is fine) -- close the handle first.
   const { sqlite } = await import("../db/client.js");

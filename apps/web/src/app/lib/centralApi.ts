@@ -48,8 +48,12 @@ export const adminAuthApi = {
   // enrollment comes next. See routes/auth.ts.
   login: (email: string, password: string) => central.post<{ mfaRequired: true; setupRequired: boolean }>("/auth/admin/login", { email, password }),
   mfaEnrollStart: () => central.post<{ secret: string; otpauthUrl: string }>("/auth/admin/mfa/enroll/start"),
-  mfaEnrollConfirm: (code: string) => central.post<{ user: AdminUser }>("/auth/admin/mfa/enroll/confirm", { code }),
-  mfaVerify: (code: string) => central.post<{ user: AdminUser }>("/auth/admin/mfa/verify", { code }),
+  // ipRangeWarning: Auth doc 3.5's session-to-IP-range binding -- real, but
+  // flags rather than blocks (see central-server/src/auth/ipRanges.ts for
+  // why). `false` whenever the feature isn't configured, not just when the
+  // IP happens to match.
+  mfaEnrollConfirm: (code: string) => central.post<{ user: AdminUser; ipRangeWarning: boolean }>("/auth/admin/mfa/enroll/confirm", { code }),
+  mfaVerify: (code: string) => central.post<{ user: AdminUser; ipRangeWarning: boolean }>("/auth/admin/mfa/verify", { code }),
   logout: () => central.post<{ ok: true }>("/auth/admin/logout"),
   me: () => central.get<AdminUser>("/auth/admin/me"),
 };

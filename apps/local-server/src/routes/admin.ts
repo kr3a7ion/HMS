@@ -58,7 +58,8 @@ router.post("/users", requireAuth, requirePermission("admin:manage"), async (req
   const parsed = inviteSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "INVALID_INPUT", details: parsed.error.flatten() });
   if (!roleExists(parsed.data.role)) return res.status(400).json({ error: "INVALID_ROLE" });
-  if (db.select().from(users).where(eq(users.email, parsed.data.email)).get()) return res.status(409).json({ error: "EMAIL_IN_USE" });
+  const email = parsed.data.email.toLowerCase();
+  if (db.select().from(users).where(eq(users.email, email)).get()) return res.status(409).json({ error: "EMAIL_IN_USE" });
 
   const tempPassword = randomTempPassword();
   const passwordHash = await hashPassword(tempPassword);
@@ -67,11 +68,11 @@ router.post("/users", requireAuth, requirePermission("admin:manage"), async (req
   const employeeId = nextEmployeeId(req.auth!.branchId);
   db.insert(users).values({
     id, organizationId: req.auth!.orgId, branchId: req.auth!.branchId,
-    email: parsed.data.email, passwordHash, role: parsed.data.role,
+    email, passwordHash, role: parsed.data.role,
     firstName: parsed.data.firstName, lastName: parsed.data.lastName, status: "active",
     createdAt: now, employeeId,
   }).run();
-  logAudit({ userId: req.auth!.userId, branchId: req.auth!.branchId, action: "user_invited", module: "IT Admin", recordId: id, details: `Invited ${parsed.data.email} as ${parsed.data.role}`, ipAddress: req.ip });
+  logAudit({ userId: req.auth!.userId, branchId: req.auth!.branchId, action: "user_invited", module: "IT Admin", recordId: id, details: `Invited ${email} as ${parsed.data.role}`, ipAddress: req.ip });
   res.status(201).json({ id, employeeId, tempPassword });
 });
 
