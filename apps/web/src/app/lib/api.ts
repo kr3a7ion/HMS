@@ -830,8 +830,12 @@ export interface WalkInInput {
 }
 
 export interface ReservationSearchParams {
-  q?: string; status?: string; from?: string; to?: string;
-  room?: string; ratePlanId?: string; cursor?: string; limit?: number;
+  q?: string;
+  /** Comma-separated server-side, e.g. "confirmed,pending". */
+  status?: string;
+  from?: string; to?: string;
+  roomNumber?: string; roomTypeId?: string; ratePlanId?: string;
+  cursor?: string; limit?: number;
   [key: string]: string | number | undefined;
 }
 
