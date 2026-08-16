@@ -56,6 +56,7 @@ import {
 import {
   Badge, EmptyState, ToastC, LiveClock, SyncPill, StatCard, PageHeader, BtnP, BtnO, Inp, Sel, PlaceholderScreen,
 } from "../../Screens";
+import { formatNaira } from "../../lib/money";
 
 export function MenuManagement({ add }: { add: AddToast }) {
   const [menu, setMenu] = useState<MenuCategory[]>([]);
@@ -104,7 +105,7 @@ export function MenuManagement({ add }: { add: AddToast }) {
           <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: "#F1F5F9" }}><h3 className="text-sm font-semibold" style={{ color: TEXT }}>{category?.name ?? "—"}</h3><span className="text-xs" style={{ color: SUBTLE }}>{category?.items.length ?? 0} items</span></div>
           {!category || category.items.length === 0 ? <EmptyState icon={UtensilsCrossed} message="No items in this category yet." /> : (
             <table className="w-full"><thead><tr style={{ backgroundColor: "#F8FAFC" }}>{["Name", "Price", "Available", ""].map(h => <th key={h} className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider" style={{ color: MUTED }}>{h}</th>)}</tr></thead>
-              <tbody>{category.items.map(item => <tr key={item.id} className="border-t hover:bg-[#FAFBFD]" style={{ borderColor: "#F1F5F9" }}><td className="px-5 py-4 text-sm font-medium" style={{ color: TEXT }}>{item.name}</td><td className="px-5 py-4 text-sm font-semibold" style={{ color: PRIMARY }}>₦{item.price.toLocaleString()}</td><td className="px-5 py-4"><label className="cursor-pointer" onClick={() => toggleAvailability(item.id, !item.available)}><div className="w-10 h-5 rounded-full relative" style={{ backgroundColor: item.available ? TEAL : "#CBD5E1" }}><div className="absolute w-4 h-4 bg-white rounded-full top-0.5 shadow" style={{ left: item.available ? 22 : 2 }} /></div></label></td><td className="px-5 py-4">{item.available && <button onClick={() => toggleAvailability(item.id, false)} className="text-xs px-2 py-1 rounded border" style={{ color: ERROR, borderColor: `${ERROR}20` }}>86'd</button>}</td></tr>)}</tbody>
+              <tbody>{category.items.map(item => <tr key={item.id} className="border-t hover:bg-[#FAFBFD]" style={{ borderColor: "#F1F5F9" }}><td className="px-5 py-4 text-sm font-medium" style={{ color: TEXT }}>{item.name}</td><td className="px-5 py-4 text-sm font-semibold" style={{ color: PRIMARY }}>{formatNaira(item.priceKobo)}</td><td className="px-5 py-4"><label className="cursor-pointer" onClick={() => toggleAvailability(item.id, !item.available)}><div className="w-10 h-5 rounded-full relative" style={{ backgroundColor: item.available ? TEAL : "#CBD5E1" }}><div className="absolute w-4 h-4 bg-white rounded-full top-0.5 shadow" style={{ left: item.available ? 22 : 2 }} /></div></label></td><td className="px-5 py-4">{item.available && <button onClick={() => toggleAvailability(item.id, false)} className="text-xs px-2 py-1 rounded border" style={{ color: ERROR, borderColor: `${ERROR}20` }}>86'd</button>}</td></tr>)}</tbody>
             </table>
           )}
         </div>

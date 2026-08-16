@@ -56,6 +56,7 @@ import {
 import {
   Badge, EmptyState, ToastC, LiveClock, SyncPill, StatCard, PageHeader, BtnP, BtnO, Inp, Sel, PlaceholderScreen,
 } from "../../Screens";
+import { formatNaira } from "../../lib/money";
 
 export function FinanceFolioManagement({ add }: { add: AddToast }) {
   const navigate = useNavigate();
@@ -113,9 +114,9 @@ export function FinanceFolioManagement({ add }: { add: AddToast }) {
                 <td className="px-4 py-3.5 font-bold" style={{ color: PRIMARY }}>{f.roomNumber ?? "—"}</td>
                 <td className="px-4 py-3.5 text-xs" style={{ color: MUTED }}>{new Date(f.checkInDate).toLocaleDateString()}</td>
                 <td className="px-4 py-3.5 text-xs" style={{ color: MUTED }}>{new Date(f.checkOutDate).toLocaleDateString()}</td>
-                <td className="px-4 py-3.5 text-sm font-bold" style={{ color: TEXT }}>₦{f.totalCharges.toLocaleString()}</td>
-                <td className="px-4 py-3.5 text-sm" style={{ color: SUCCESS }}>₦{f.totalPaid.toLocaleString()}</td>
-                <td className="px-4 py-3.5 text-sm font-bold" style={{ color: f.balance > 0 ? ERROR : SUCCESS }}>{f.balance > 0 ? `₦${f.balance.toLocaleString()}` : "Settled"}</td>
+                <td className="px-4 py-3.5 text-sm font-bold" style={{ color: TEXT }}>{formatNaira(f.totalChargesKobo)}</td>
+                <td className="px-4 py-3.5 text-sm" style={{ color: SUCCESS }}>{formatNaira(f.totalPaidKobo)}</td>
+                <td className="px-4 py-3.5 text-sm font-bold" style={{ color: f.balanceKobo > 0 ? ERROR : SUCCESS }}>{f.balanceKobo > 0 ? `₦${f.balanceKobo.toLocaleString()}` : "Settled"}</td>
                 <td className="px-4 py-3.5"><Badge label={f.folioStatus} colors={statusColors[f.folioStatus]} /></td>
                 <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
                   <button onClick={() => toggleDispute(f)} className="text-xs px-2.5 py-1.5 rounded-lg border" style={{ color: f.folioStatus === "disputed" ? SUCCESS : ERROR, borderColor: f.folioStatus === "disputed" ? `${SUCCESS}30` : `${ERROR}30` }}>

@@ -137,7 +137,7 @@ export function StaffProfileDetail({ add }: { add: AddToast }) {
   if (loading) return <div className="p-5"><div className="h-64 rounded-xl animate-pulse" style={{ backgroundColor: "#F1F5F9" }} /></div>;
   if (error || !staff) return <div className="p-5"><EmptyState icon={Users} message={error || "Staff member not found."} /></div>;
 
-  const baseSalary = staff.payRate ?? 0;
+  const baseSalary = staff.payRateKobo ?? 0;
   const deductions = Math.round((baseSalary / 30) * staff.attendanceSummary.absent);
   const net = baseSalary - deductions;
 
@@ -163,7 +163,7 @@ export function StaffProfileDetail({ add }: { add: AddToast }) {
             {tab === "Attendance Log" && <div className="grid grid-cols-4 gap-3">{[["Present", staff.attendanceSummary.present, SUCCESS], ["Absent", staff.attendanceSummary.absent, ERROR], ["Late", staff.attendanceSummary.late, WARNING], ["On Leave", staff.attendanceSummary.leave, TEAL]].map(([l, v, c]) => <div key={l as string} className="text-center p-3 rounded-lg" style={{ backgroundColor: "#F8FAFC" }}><div className="text-xl font-bold" style={{ color: c as string }}>{v}</div><div className="text-xs mt-0.5" style={{ color: MUTED }}>{l} (this month)</div></div>)}</div>}
             {tab === "Shifts" && (staff.upcomingShifts.length === 0 ? <EmptyState icon={CalendarDays} message="No published shifts scheduled." /> : <div className="space-y-2">{staff.upcomingShifts.map(sh => <div key={sh.id} className="text-sm p-2 rounded-lg" style={{ backgroundColor: "#F8FAFC", color: TEXT }}>{new Date(sh.date).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })} · {sh.shiftType}</div>)}</div>)}
             {tab === "Payroll Summary" && <div>
-              <div className="flex items-center justify-between mb-2"><div className="text-sm font-semibold" style={{ color: TEXT }}>Current period</div>{staff.payRate == null && <span className="text-xs" style={{ color: MUTED }}>No pay rate on file</span>}</div>
+              <div className="flex items-center justify-between mb-2"><div className="text-sm font-semibold" style={{ color: TEXT }}>Current period</div>{staff.payRateKobo == null && <span className="text-xs" style={{ color: MUTED }}>No pay rate on file</span>}</div>
               <div className="space-y-2">{[["Base Salary", `₦${baseSalary.toLocaleString()}`, TEXT], ["Overtime", "₦0", MUTED], ["Deductions", `−₦${deductions.toLocaleString()}`, ERROR], ["Net Pay", `₦${net.toLocaleString()}`, SUCCESS]].map(([k, v, c]) => <div key={k as string} className="flex justify-between text-sm border-b pb-2" style={{ borderColor: "#F1F5F9" }}><span style={{ color: MUTED }}>{k}</span><span className="font-bold" style={{ color: c as string }}>{v}</span></div>)}</div>
               <div className="flex items-center gap-2 mt-4"><input type="number" placeholder="New monthly rate (₦)" id="pay-rate-input" className="flex-1 px-3 py-2 rounded-xl border text-sm outline-none" style={{ borderColor: BORDER }} onKeyDown={e => { if (e.key === "Enter") { const v = Number((e.target as HTMLInputElement).value); if (v > 0) { adjustPay(v); (e.target as HTMLInputElement).value = ""; } } }} /><span className="text-xs" style={{ color: SUBTLE }}>Enter to save</span></div>
             </div>}

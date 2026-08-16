@@ -57,6 +57,7 @@ import {
 import {
   Badge, EmptyState, ToastC, LiveClock, SyncPill, StatCard, PageHeader, BtnP, BtnO, Inp, Sel, PlaceholderScreen,
 } from "../../Screens";
+import { formatNaira } from "../../lib/money";
 
 export function CheckInWizard({ add }: { add: AddToast }) {
   const navigate = useNavigate();
@@ -163,7 +164,7 @@ export function CheckInWizard({ add }: { add: AddToast }) {
             <div className="space-y-2">{arrivals.map(a => <div key={a.id} onClick={() => setSelRes(a.id)} className="flex items-center gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all" style={{ borderColor: selRes === a.id ? PRIMARY : BORDER, backgroundColor: selRes === a.id ? "#EFF6FF" : "white" }}>
               <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white flex-shrink-0" style={{ backgroundColor: PRIMARY }}>{(a.guestFirstName?.[0] ?? "") + (a.guestLastName?.[0] ?? "")}</div>
               <div className="flex-1"><div className="text-sm font-semibold" style={{ color: TEXT }}>{a.guestFirstName} {a.guestLastName}</div><div className="text-xs mt-0.5" style={{ color: MUTED }}>{a.roomNumber ? `Room ${a.roomNumber} · ` : "No room assigned · "}{new Date(a.checkInDate).toLocaleDateString()} → {new Date(a.checkOutDate).toLocaleDateString()}</div></div>
-              <div className="text-sm font-bold" style={{ color: TEXT }}>₦{a.rate.toLocaleString()}/night</div>
+              <div className="text-sm font-bold" style={{ color: TEXT }}>{formatNaira(a.rateKobo)}/night</div>
               {selRes === a.id && <CheckCircle2 size={20} style={{ color: PRIMARY }} />}
             </div>)}</div>
           )}
@@ -174,7 +175,7 @@ export function CheckInWizard({ add }: { add: AddToast }) {
             <div className="grid grid-cols-3 gap-3">{rooms.map(r => <div key={r.id} onClick={() => setSelRoom(r.id)} className="p-4 rounded-xl border-2 cursor-pointer transition-all" style={{ borderColor: selRoom === r.id ? PRIMARY : BORDER, backgroundColor: selRoom === r.id ? "#EFF6FF" : "white" }}><div className="flex items-center justify-between mb-1"><span className="text-lg font-bold" style={{ color: TEXT }}>{r.number}</span>{selRoom === r.id && <CheckCircle2 size={16} style={{ color: PRIMARY }} />}</div><div className="text-xs" style={{ color: MUTED }}>{r.type} · F{r.floor}</div><Badge label="Available" colors={{ bg: "#DCFCE7", text: "#166534" }} /></div>)}</div>
           )}
         </div>}
-        {step === 4 && selData && <div><h2 className="text-base font-semibold mb-4" style={{ color: TEXT }}>Collect Payment / Deposit</h2><p className="text-sm mb-3" style={{ color: MUTED }}>Payment intake isn't wired to a real endpoint yet — charges are posted for real once the guest is checked in, from the Folio screen.</p><div className="rounded-xl p-4" style={{ backgroundColor: "#F8FAFC" }}><div className="flex justify-between text-sm"><span style={{ color: MUTED }}>Rate</span><span style={{ color: TEXT }}>₦{selData.rate.toLocaleString()}/night</span></div></div></div>}
+        {step === 4 && selData && <div><h2 className="text-base font-semibold mb-4" style={{ color: TEXT }}>Collect Payment / Deposit</h2><p className="text-sm mb-3" style={{ color: MUTED }}>Payment intake isn't wired to a real endpoint yet — charges are posted for real once the guest is checked in, from the Folio screen.</p><div className="rounded-xl p-4" style={{ backgroundColor: "#F8FAFC" }}><div className="flex justify-between text-sm"><span style={{ color: MUTED }}>Rate</span><span style={{ color: TEXT }}>{formatNaira(selData.rateKobo)}/night</span></div></div></div>}
         {step === 5 && <div className="text-center py-4"><CheckCircle2 size={48} className="mx-auto mb-4" style={{ color: SUCCESS }} /><h2 className="text-base font-semibold mb-1" style={{ color: TEXT }}>Receipt</h2><p className="text-sm mb-5" style={{ color: MUTED }}>Receipt generation isn't wired yet — placeholder step.</p></div>}
         {step === 6 && <div className="text-center py-4">
           <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4" style={{ backgroundColor: "#DCFCE7" }}><KeyRound size={32} style={{ color: SUCCESS }} /></div>

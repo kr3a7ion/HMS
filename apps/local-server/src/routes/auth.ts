@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { users, activeSessions, branches } from "../db/schema.js";
 import { verifyPassword, hashPassword } from "../auth/passwords.js";
-import { permissionsHashForRole } from "../auth/permissions.js";
+import { permissionsHashForRole, permissionsForRole } from "../auth/permissions.js";
 import {
   signAccessToken, signGraceExtensionToken, decodeIgnoringExpiry,
   generateRefreshToken, hashRefreshToken,
@@ -13,11 +13,15 @@ import {
 } from "../auth/tokens.js";
 import { requireAuth, type AuthedRequest } from "../auth/middleware.js";
 import { logAudit } from "../services/audit.js";
+import { checkLoginThrottle, clearLoginThrottle, recordLoginFailure } from "../lib/loginThrottle.js";
+import { hashIdentifier } from "../lib/redact.js";
+import { cookieOptions } from "../lib/security.js";
+import { transaction } from "../db/tx.js";
 
 const router = Router();
 
-const MAX_ATTEMPTS = 5; // Auth doc Part 5.3
-const LOCKOUT_MINUTES = 15;
+// B17.4: hard lockout is gone -- see lib/loginThrottle.ts for why it was a
+// denial-of-service vector rather than a protection.
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days, Part 6.1
 
 const loginSchema = z.object({
@@ -31,63 +35,118 @@ router.post("/login", async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: "INVALID_INPUT" });
   const { email, password } = parsed.data;
 
+  const ip = req.ip ?? "unknown";
+
+  // B17.4. Checked BEFORE the account is looked up, so the delay is identical
+  // whether or not the email exists -- otherwise the throttle itself becomes
+  // an account-enumeration oracle.
+  const throttle = checkLoginThrottle(ip, email);
+  if (throttle.blocked) {
+    res.setHeader("Retry-After", String(throttle.retryAfterSeconds));
+    return res.status(429).json({
+      error: "TOO_MANY_ATTEMPTS",
+      retryAfterSeconds: throttle.retryAfterSeconds,
+    });
+  }
+
   const user = db.select().from(users).where(eq(users.email, email.toLowerCase())).get();
 
   // Same generic error whether the account exists or the password is wrong —
   // don't leak which one it was.
   if (!user) {
+    const unknownState = recordLoginFailure(ip, email);
     // This local server instance serves exactly one branch (Auth doc's
     // one-server-per-branch model), so even an unmatched email is still a
     // real security event for that branch -- worth showing IT-05, not
     // dropping because there's no authenticated user to attribute it to.
+    //
+    // B17.6: the attempted email is HASHED, not written verbatim. People
+    // mistype their password into the email field, and paste personal
+    // addresses in; an audit log that anyone with admin:operations can read
+    // should not become a collection of other people's credentials and
+    // contact details. The hash still lets an investigator group repeated
+    // attempts against the same target.
     const branch = db.select().from(branches).limit(1).get();
-    logAudit({ userId: null, branchId: branch?.id ?? null, action: "login_failed", module: "auth", details: `Unknown email: ${email}`, ipAddress: req.ip });
+    logAudit({
+      userId: null, branchId: branch?.id ?? null, action: "login_failed", module: "auth",
+      details: `Unknown account (${hashIdentifier(email)})`, ipAddress: ip,
+    });
+
+    // The response must be INDISTINGUISHABLE from a wrong password on a real
+    // account, including when the throttle engages. Recording the failure but
+    // still answering 401 here -- which is what this did at first, caught by
+    // the enumeration test -- makes the 401/429 difference a free oracle for
+    // "does this address have an account?".
+    if (unknownState.blocked) {
+      res.setHeader("Retry-After", String(unknownState.retryAfterSeconds));
+      return res.status(429).json({
+        error: "TOO_MANY_ATTEMPTS",
+        retryAfterSeconds: unknownState.retryAfterSeconds,
+      });
+    }
     return res.status(401).json({ error: "INVALID_CREDENTIALS" });
   }
 
-  if (user.lockedUntil && user.lockedUntil.getTime() > Date.now()) {
-    logAudit({ userId: user.id, branchId: user.branchId, action: "login_blocked_locked", module: "auth", ipAddress: req.ip });
-    return res.status(423).json({ error: "ACCOUNT_LOCKED", lockedUntil: user.lockedUntil.toISOString() });
-  }
   if (user.status !== "active") {
-    logAudit({ userId: user.id, branchId: user.branchId, action: "login_blocked_inactive", module: "auth", ipAddress: req.ip });
+    logAudit({ userId: user.id, branchId: user.branchId, action: "login_blocked_inactive", module: "auth", ipAddress: ip });
     return res.status(403).json({ error: "ACCOUNT_INACTIVE" });
   }
 
   const valid = await verifyPassword(password, user.passwordHash);
   if (!valid) {
-    const attempts = user.failedLoginAttempts + 1;
-    const locked = attempts >= MAX_ATTEMPTS;
-    const lockedUntil = locked ? new Date(Date.now() + LOCKOUT_MINUTES * 60 * 1000) : null;
+    // B17.4 REPLACES HARD LOCKOUT. Five wrong passwords used to lock the
+    // account for 15 minutes, which handed a denial-of-service to anyone who
+    // knew a colleague's email: five deliberate failures and the night
+    // manager cannot log in during their shift, with no IT desk at 2am.
+    //
+    // Backoff grows the delay instead, keyed on IP + account, and never
+    // permanently locks anyone out. failedLoginAttempts is still recorded
+    // because IT-05 reports on it; it no longer gates anything.
+    const state = recordLoginFailure(ip, email);
     db.update(users)
-      .set({ failedLoginAttempts: locked ? 0 : attempts, lockedUntil })
+      .set({ failedLoginAttempts: user.failedLoginAttempts + 1 })
       .where(eq(users.id, user.id))
       .run();
-    logAudit({ userId: user.id, branchId: user.branchId, action: locked ? "login_failed_locked_out" : "login_failed", module: "auth", ipAddress: req.ip });
-    if (locked) return res.status(423).json({ error: "ACCOUNT_LOCKED", lockedUntil: lockedUntil!.toISOString() });
-    return res.status(401).json({ error: "INVALID_CREDENTIALS", attemptsRemaining: MAX_ATTEMPTS - attempts });
+    logAudit({ userId: user.id, branchId: user.branchId, action: "login_failed", module: "auth", ipAddress: ip });
+
+    if (state.blocked) {
+      res.setHeader("Retry-After", String(state.retryAfterSeconds));
+      return res.status(429).json({
+        error: "TOO_MANY_ATTEMPTS",
+        retryAfterSeconds: state.retryAfterSeconds,
+      });
+    }
+    return res.status(401).json({ error: "INVALID_CREDENTIALS" });
   }
 
-  db.update(users).set({ failedLoginAttempts: 0, lockedUntil: null }).where(eq(users.id, user.id)).run();
-  logAudit({ userId: user.id, branchId: user.branchId, action: "login_success", module: "auth", ipAddress: req.ip });
+  clearLoginThrottle(ip, email);
 
   const sessionId = nanoid();
   const now = new Date();
   const expiresAt = new Date(now.getTime() + ACCESS_TOKEN_TTL_SECONDS * 1000);
   const refreshToken = generateRefreshToken();
 
-  db.insert(activeSessions).values({
-    sessionId,
-    userId: user.id,
-    branchId: user.branchId,
-    refreshTokenHash: hashRefreshToken(refreshToken),
-    issuedAt: now,
-    expiresAt,
-    lastActiveAt: now,
-    ipAddress: req.ip,
-    userAgent: req.headers["user-agent"] ?? null,
-    isOfflineMode: false,
-  }).run();
+  // Clearing the lockout, writing the audit row and creating the session are
+  // one unit (B3 / invariant 3). Half of this succeeding is the bad case: a
+  // cleared attempt counter with no session hands out a free retry, and a
+  // session row with the counter still set locks out an account that just
+  // authenticated successfully.
+  transaction(() => {
+    db.update(users).set({ failedLoginAttempts: 0, lockedUntil: null }).where(eq(users.id, user.id)).run();
+    logAudit({ userId: user.id, branchId: user.branchId, action: "login_success", module: "auth", ipAddress: req.ip });
+    db.insert(activeSessions).values({
+      sessionId,
+      userId: user.id,
+      branchId: user.branchId,
+      refreshTokenHash: hashRefreshToken(refreshToken),
+      issuedAt: now,
+      expiresAt,
+      lastActiveAt: now,
+      ipAddress: req.ip,
+      userAgent: req.headers["user-agent"] ?? null,
+      isOfflineMode: false,
+    }).run();
+  });
 
   const accessToken = signAccessToken({
     sub: user.id,
@@ -98,8 +157,8 @@ router.post("/login", async (req, res) => {
     session_id: sessionId,
   });
 
-  res.cookie("access_token", accessToken, { httpOnly: true, sameSite: "strict", maxAge: ACCESS_TOKEN_TTL_SECONDS * 1000 });
-  res.cookie("refresh_token", refreshToken, { httpOnly: true, sameSite: "strict", maxAge: REFRESH_TOKEN_TTL_MS });
+  res.cookie("access_token", accessToken, cookieOptions(ACCESS_TOKEN_TTL_SECONDS * 1000));
+  res.cookie("refresh_token", refreshToken, cookieOptions(REFRESH_TOKEN_TTL_MS));
 
   res.json({
     user: {
@@ -141,7 +200,7 @@ router.post("/continue-offline", (req, res) => {
     .where(eq(activeSessions.sessionId, payload.session_id))
     .run();
 
-  res.cookie("access_token", extension, { httpOnly: true, sameSite: "strict", maxAge: GRACE_EXTENSION_TTL_SECONDS * 1000 });
+  res.cookie("access_token", extension, cookieOptions(GRACE_EXTENSION_TTL_SECONDS * 1000));
   res.json({ offlineExtension: true, expiresInSeconds: GRACE_EXTENSION_TTL_SECONDS });
 });
 
@@ -165,6 +224,13 @@ router.get("/me", requireAuth, (req: AuthedRequest, res) => {
     id: user.id, email: user.email, role: user.role,
     firstName: user.firstName, lastName: user.lastName,
     branchId: user.branchId, organizationId: user.organizationId,
+    // The effective permission set, so the client can hide an action the
+    // server would refuse anyway. This is a CONVENIENCE, not a control:
+    // requirePermission() on each route remains the only thing enforcing
+    // anything, and a client that ignores this list gains nothing but 403s.
+    // Without it the UI can only gate by role name, which drifts the moment
+    // a manager edits a role via HR-03.
+    permissions: permissionsForRole(user.role),
   });
 });
 

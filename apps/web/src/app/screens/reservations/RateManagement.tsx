@@ -71,7 +71,7 @@ export function RateManagement({ add }: { add: (t: Omit<Toast, "id">) => void })
     if (!editPlan) return;
     setPlans(p => p.map(r => r.id === editPlan.id ? { ...r, name: editValues.name, base: Number(editValues.base) || r.base, dates: editValues.dates } : r));
     setEditPlan(null);
-    add({ type: "success", title: "Rate plan updated", body: editValues.name });
+    add({ type: "info", title: "Not available yet — this screen is not wired to the rate-plan API", body: editValues.name });
   };
   const toggleActive = (id: string) => {
     setPlans(p => p.map(r => r.id === id ? { ...r, active: !r.active } : r));
@@ -145,7 +145,7 @@ export function RateManagement({ add }: { add: (t: Omit<Toast, "id">) => void })
             </div>
             <div className="flex gap-3 mt-5">
               <button onClick={() => setShowCreate(false)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold border" style={{ color: MUTED, borderColor: BORDER }}>Cancel</button>
-              <button onClick={() => { setShowCreate(false); add({ type: "success", title: "Rate plan created" }); }} className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white" style={{ backgroundColor: PRIMARY }}>Create Plan</button>
+              <button onClick={() => { setShowCreate(false); add({ type: "info", title: "Not available yet — this screen is not wired to the rate-plan API" }); }} className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white" style={{ backgroundColor: PRIMARY }}>Create Plan</button>
             </div>
           </div>
         </>

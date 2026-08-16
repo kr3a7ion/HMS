@@ -56,6 +56,7 @@ import {
 import {
   Badge, EmptyState, ToastC, LiveClock, SyncPill, StatCard, PageHeader, BtnP, BtnO, Inp, Sel, PlaceholderScreen,
 } from "../../Screens";
+import { formatNaira } from "../../lib/money";
 
 export function RevenueReports() {
   const [data, setData] = useState<RevenueReport | null>(null);
@@ -73,12 +74,12 @@ export function RevenueReports() {
       <PageHeader title="Revenue Reports" sub={`${new Date(data.start).toLocaleDateString()} – ${new Date(data.end).toLocaleDateString()}`} />
       <div className="grid grid-cols-3 gap-4 mb-5">
         <div className="bg-white rounded-xl p-5 border" style={{ borderColor: BORDER }}>
-          <div className="text-2xl font-bold mb-1" style={{ color: TEXT }}>₦{data.totalRevenue.toLocaleString()}</div>
+          <div className="text-2xl font-bold mb-1" style={{ color: TEXT }}>{formatNaira(data.totalRevenueKobo)}</div>
           <div className="text-xs uppercase tracking-wider mb-1" style={{ color: MUTED }}>Total Revenue</div>
           {data.changeVsPreviousPeriod != null && <div className={`flex items-center gap-1 text-xs ${data.changeVsPreviousPeriod >= 0 ? "text-green-600" : "text-red-500"}`}>{data.changeVsPreviousPeriod >= 0 ? <TrendingUp size={11} /> : <TrendingDown size={11} />}{data.changeVsPreviousPeriod}% vs previous period</div>}
         </div>
-        <div className="bg-white rounded-xl p-5 border" style={{ borderColor: BORDER }}><div className="text-2xl font-bold mb-1" style={{ color: TEXT }}>₦{data.adr.toLocaleString()}</div><div className="text-xs uppercase tracking-wider" style={{ color: MUTED }}>ADR</div></div>
-        <div className="bg-white rounded-xl p-5 border" style={{ borderColor: BORDER }}><div className="text-2xl font-bold mb-1" style={{ color: TEXT }}>₦{data.revpar.toLocaleString()}</div><div className="text-xs uppercase tracking-wider" style={{ color: MUTED }}>RevPAR</div></div>
+        <div className="bg-white rounded-xl p-5 border" style={{ borderColor: BORDER }}><div className="text-2xl font-bold mb-1" style={{ color: TEXT }}>{formatNaira(data.adrKobo)}</div><div className="text-xs uppercase tracking-wider" style={{ color: MUTED }}>ADR</div></div>
+        <div className="bg-white rounded-xl p-5 border" style={{ borderColor: BORDER }}><div className="text-2xl font-bold mb-1" style={{ color: TEXT }}>{formatNaira(data.revparKobo)}</div><div className="text-xs uppercase tracking-wider" style={{ color: MUTED }}>RevPAR</div></div>
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <div className="bg-white rounded-xl border p-5" style={{ borderColor: BORDER }}>
@@ -100,7 +101,7 @@ export function RevenueReports() {
           {data.revenueByCategory.length === 0 ? <EmptyState icon={DollarSign} message="No revenue posted in this period yet." /> : (
             <>
               <ResponsiveContainer width="100%" height={160}><PieChart><Pie key="rev-cat-pie" data={data.revenueByCategory} cx="50%" cy="50%" innerRadius={45} outerRadius={70} paddingAngle={3} dataKey="amount" nameKey="category" stroke="none">{data.revenueByCategory.map((_, i) => <Cell key={`rev-cat-cell-${i}`} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}</Pie><Tooltip formatter={(v: any) => [`₦${v.toLocaleString()}`]} contentStyle={{ border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12 }} /></PieChart></ResponsiveContainer>
-              <div className="space-y-1 mt-2">{data.revenueByCategory.map((c, i) => <div key={c.category} className="flex items-center justify-between text-xs"><div className="flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }} />{c.category}</div><span className="font-semibold" style={{ color: TEXT }}>₦{c.amount.toLocaleString()}</span></div>)}</div>
+              <div className="space-y-1 mt-2">{data.revenueByCategory.map((c, i) => <div key={c.category} className="flex items-center justify-between text-xs"><div className="flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }} />{c.category}</div><span className="font-semibold" style={{ color: TEXT }}>{formatNaira(c.amountKobo)}</span></div>)}</div>
             </>
           )}
         </div>

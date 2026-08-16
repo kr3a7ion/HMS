@@ -56,6 +56,7 @@ import {
 import {
   Badge, EmptyState, ToastC, LiveClock, SyncPill, StatCard, PageHeader, BtnP, BtnO, Inp, Sel, PlaceholderScreen,
 } from "../../Screens";
+import { toKobo, formatNaira } from "../../lib/money";
 
 export function FolioScreen({ add }: { add: AddToast }) {
   const params = useParams();
@@ -84,7 +85,7 @@ export function FolioScreen({ add }: { add: AddToast }) {
     if (!reservationId || !charge.description || !charge.amount) { add({ type: "warning", title: "Fill in description and amount" }); return; }
     setPosting(true);
     try {
-      const folio = await reservationsApi.postCharge(reservationId, { category: charge.category, description: charge.description, unitPrice: Number(charge.amount) });
+      const folio = await reservationsApi.postCharge(reservationId, { category: charge.category, description: charge.description, unitPriceKobo: toKobo(Number(charge.amount)) });
       setDetail(d => d ? { ...d, folio } : d);
       setShowCharge(false);
       add({ type: "success", title: "Charge posted", body: `${charge.category} · ₦${Number(charge.amount).toLocaleString()}` });
@@ -133,8 +134,8 @@ export function FolioScreen({ add }: { add: AddToast }) {
                 <td className="px-4 py-3.5"><span className="text-xs px-1.5 py-0.5 rounded" style={{ backgroundColor: "#F1F5F9", color: MUTED }}>{c.category}</span></td>
                 <td className="px-4 py-3.5 text-sm" style={{ color: TEXT }}>{c.description}</td>
                 <td className="px-4 py-3.5 text-sm" style={{ color: MUTED }}>{c.quantity}</td>
-                <td className="px-4 py-3.5 text-sm" style={{ color: MUTED }}>₦{c.unitPrice.toLocaleString()}</td>
-                <td className="px-4 py-3.5 text-sm font-bold" style={{ color: TEXT }}>₦{c.amount.toLocaleString()}</td>
+                <td className="px-4 py-3.5 text-sm" style={{ color: MUTED }}>{formatNaira(c.unitPriceKobo)}</td>
+                <td className="px-4 py-3.5 text-sm font-bold" style={{ color: TEXT }}>{formatNaira(c.amountKobo)}</td>
                 <td className="px-4 py-3.5 text-xs" style={{ color: SUBTLE, fontFamily: mono }}>{new Date(c.postedAt).toLocaleString()}</td>
               </tr>
             ))}
@@ -142,9 +143,9 @@ export function FolioScreen({ add }: { add: AddToast }) {
         </table>
         <div className="px-5 py-4 border-t flex justify-end" style={{ borderColor: BORDER, backgroundColor: "#F8FAFC" }}>
           <div className="w-64 space-y-1.5 text-sm">
-            <div className="flex justify-between"><span style={{ color: MUTED }}>Total charges</span><span>₦{folio.totalCharges.toLocaleString()}</span></div>
-            <div className="flex justify-between"><span style={{ color: MUTED }}>Paid</span><span style={{ color: SUCCESS }}>−₦{folio.totalPaid.toLocaleString()}</span></div>
-            <div className="flex justify-between font-bold text-base pt-2 border-t" style={{ borderColor: BORDER, color: TEXT }}><span>Balance</span><span>₦{folio.balance.toLocaleString()}</span></div>
+            <div className="flex justify-between"><span style={{ color: MUTED }}>Total charges</span><span>{formatNaira(folio.totalChargesKobo)}</span></div>
+            <div className="flex justify-between"><span style={{ color: MUTED }}>Paid</span><span style={{ color: SUCCESS }}>{formatNaira(folio.totalPaidKobo)}</span></div>
+            <div className="flex justify-between font-bold text-base pt-2 border-t" style={{ borderColor: BORDER, color: TEXT }}><span>Balance</span><span>{formatNaira(folio.balanceKobo)}</span></div>
           </div>
         </div>
       </div>

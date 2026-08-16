@@ -56,6 +56,7 @@ import {
 import {
   Badge, EmptyState, ToastC, LiveClock, SyncPill, StatCard, PageHeader, BtnP, BtnO, Inp, Sel, PlaceholderScreen,
 } from "../../Screens";
+import { formatNaira } from "../../lib/money";
 
 function fmtStat(s: DashboardStat): string {
   if (s.isCurrency) return fmtN(Number(s.value));
@@ -136,7 +137,7 @@ export function DashboardRole({ role, nav }: { role: Role; nav?: (s: string, lab
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">{data.stats.map(s => { const meta = STAT_ICON[s.label] ?? { icon: Activity, accent: PRIMARY }; return <StatCard key={s.label} label={s.label} value={fmtStat(s)} sub={s.sub} icon={meta.icon} accent={meta.accent} />; })}</div>
       <div className="bg-white rounded-xl border overflow-hidden mb-6" style={{ borderColor: BORDER }}>
         <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: "#F1F5F9" }}><h3 className="text-sm font-semibold" style={{ color: TEXT }}>Today's Arrivals</h3><BtnO label="Arrivals List" onClick={() => navigate("/reservations/grid")} /></div>
-        {arrivals.length === 0 ? <EmptyState icon={KeyRound} message="No confirmed arrivals waiting today." /> : arrivals.map(g => <div key={g.id} className="flex items-center gap-4 px-5 py-3 border-b" style={{ borderColor: "#F8FAFC" }}><div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold text-white flex-shrink-0" style={{ backgroundColor: PRIMARY }}>{(g.guestFirstName?.[0] ?? "") + (g.guestLastName?.[0] ?? "")}</div><div className="flex-1"><div className="text-sm font-medium" style={{ color: TEXT }}>{g.guestFirstName} {g.guestLastName}</div><div className="text-xs" style={{ color: MUTED }}>{g.roomNumber ? `Room ${g.roomNumber}` : "No room assigned"} · ₦{g.rate.toLocaleString()}/night</div></div><BtnO label="Check In" onClick={() => navigate("/front-desk/check-in")} /></div>)}
+        {arrivals.length === 0 ? <EmptyState icon={KeyRound} message="No confirmed arrivals waiting today." /> : arrivals.map(g => <div key={g.id} className="flex items-center gap-4 px-5 py-3 border-b" style={{ borderColor: "#F8FAFC" }}><div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold text-white flex-shrink-0" style={{ backgroundColor: PRIMARY }}>{(g.guestFirstName?.[0] ?? "") + (g.guestLastName?.[0] ?? "")}</div><div className="flex-1"><div className="text-sm font-medium" style={{ color: TEXT }}>{g.guestFirstName} {g.guestLastName}</div><div className="text-xs" style={{ color: MUTED }}>{g.roomNumber ? `Room ${g.roomNumber}` : "No room assigned"} · {formatNaira(g.rateKobo)}/night</div></div><BtnO label="Check In" onClick={() => navigate("/front-desk/check-in")} /></div>)}
       </div>
       <div className="bg-white rounded-xl border overflow-hidden" style={{ borderColor: BORDER }}>
         <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: "#F1F5F9" }}><h3 className="text-sm font-semibold" style={{ color: TEXT }}>Recent Activity</h3></div>

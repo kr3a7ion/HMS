@@ -56,6 +56,7 @@ import {
 import {
   Badge, EmptyState, ToastC, LiveClock, SyncPill, StatCard, PageHeader, BtnP, BtnO, Inp, Sel, PlaceholderScreen,
 } from "../../Screens";
+import { toKobo, formatNaira } from "../../lib/money";
 
 export function PurchaseOrders({ add }: { add: AddToast }) {
   const [pos, setPos] = useState<PurchaseOrderListItem[]>([]);
@@ -81,7 +82,7 @@ export function PurchaseOrders({ add }: { add: AddToast }) {
   };
 
   const create = async () => {
-    const items = lines.filter(l => l.productId && l.quantity).map(l => ({ productId: l.productId, quantity: Number(l.quantity), unitCost: Number(l.unitCost) || (products.find(p => p.id === l.productId)?.unitCost ?? 0) }));
+    const items = lines.filter(l => l.productId && l.quantity).map(l => ({ productId: l.productId, quantity: Number(l.quantity), unitCostKobo: l.unitCost ? toKobo(Number(l.unitCost)) : (products.find(p => p.id === l.productId)?.unitCostKobo ?? 0) }));
     if (!supplierId || items.length === 0) { add({ type: "error", title: "Pick a supplier and at least one item" }); return; }
     try {
       const res = await inventoryApi.createPurchaseOrder({ supplierId, items });

@@ -64,7 +64,7 @@ export function RoomAssignmentBoard({ add, nav }: { add: (t: Omit<Toast, "id">) 
   const [selRoom, setSelRoom] = useState<string | null>(null);
   return (
     <div>
-      <PageHeader title="Room Assignment Board" sub="Assign unassigned arrivals to available rooms" actions={<BtnP label="Auto-Assign All" icon={Zap} onClick={() => add({ type: "success", title: "Auto-assigned 2 arrivals" })} />} />
+      <PageHeader title="Room Assignment Board" sub="Assign unassigned arrivals to available rooms" actions={<BtnP label="Auto-Assign All" icon={Zap} onClick={() => add({ type: "info", title: "Not available yet — auto-assignment is not wired" })} />} />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <div className="bg-white rounded-xl border overflow-hidden" style={{ borderColor: BORDER }}>
           <div className="px-5 py-4 border-b" style={{ borderColor: "#F1F5F9", backgroundColor: "#F8FAFC" }}><h3 className="text-sm font-semibold" style={{ color: TEXT }}>Unassigned Arrivals ({unassigned.length})</h3><p className="text-xs mt-0.5" style={{ color: MUTED }}>Select an arrival, then a room to assign</p></div>
@@ -75,7 +75,7 @@ export function RoomAssignmentBoard({ add, nav }: { add: (t: Omit<Toast, "id">) 
           <div className="px-5 py-4 border-b" style={{ borderColor: "#F1F5F9", backgroundColor: "#F8FAFC" }}><h3 className="text-sm font-semibold" style={{ color: TEXT }}>Available Rooms ({available.length})</h3></div>
           <div className="grid grid-cols-3 gap-2 p-4">{available.map(r => <div key={r.id} onClick={() => setSelRoom(r.id)} className="p-3 rounded-xl border-2 cursor-pointer text-center transition-all" style={{ borderColor: selRoom === r.id ? PRIMARY : BORDER, backgroundColor: selRoom === r.id ? "#EFF6FF" : "white" }}><div className="text-lg font-bold" style={{ color: TEXT }}>{r.id}</div><div className="text-xs" style={{ color: MUTED }}>{r.type}</div><div className="text-xs" style={{ color: SUBTLE }}>Floor {r.floor}</div></div>)}</div>
           {sel && selRoom && (
-            <div className="px-5 pb-5"><div className="p-3 rounded-xl mb-3" style={{ backgroundColor: "#F0FDF4", border: `1px solid #BBF7D0` }}><div className="text-xs font-semibold" style={{ color: SUCCESS }}>Assignment Preview</div><div className="text-sm mt-1" style={{ color: TEXT }}>{ARRIVALS_DATA.find(a => a.id === sel)?.guest} → Room {selRoom}</div></div><BtnP label="Confirm Assignment" icon={CheckCircle2} onClick={() => { add({ type: "success", title: "Room assigned", body: `Room ${selRoom} → ${ARRIVALS_DATA.find(a => a.id === sel)?.guest}` }); setSel(null); setSelRoom(null); }} /></div>
+            <div className="px-5 pb-5"><div className="p-3 rounded-xl mb-3" style={{ backgroundColor: "#F0FDF4", border: `1px solid #BBF7D0` }}><div className="text-xs font-semibold" style={{ color: SUCCESS }}>Assignment Preview</div><div className="text-sm mt-1" style={{ color: TEXT }}>{ARRIVALS_DATA.find(a => a.id === sel)?.guest} → Room {selRoom}</div></div><BtnP label="Confirm Assignment" icon={CheckCircle2} onClick={() => { add({ type: "info", title: "Not available yet — this screen is not wired to room assignment", body: `Room ${selRoom} → ${ARRIVALS_DATA.find(a => a.id === sel)?.guest}` }); setSel(null); setSelRoom(null); }} /></div>
           )}
         </div>
       </div>

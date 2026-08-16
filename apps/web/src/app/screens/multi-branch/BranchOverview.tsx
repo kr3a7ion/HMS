@@ -57,7 +57,7 @@ export function BranchOverview({ add }: { add: AddToast }) {
               <div className="grid grid-cols-2 gap-3 mb-4">
                 {[
                   { l: "Occupancy", v: b.occupancyRate != null ? `${b.occupancyRate}%` : "—", c: (b.occupancyRate ?? 0) > 80 ? SUCCESS : WARNING },
-                  { l: "Revenue Today", v: b.revenueToday != null ? `₦${b.revenueToday.toLocaleString()}` : "—", c: TEXT },
+                  { l: "Revenue Today", v: b.revenueTodayKobo != null ? `₦${b.revenueTodayKobo.toLocaleString()}` : "—", c: TEXT },
                   { l: "Open Issues", v: b.openIssues ?? "—", c: (b.openIssues ?? 0) > 5 ? ERROR : SUCCESS },
                   { l: "Total Rooms", v: b.roomsTotal ?? "—", c: TEXT },
                 ].map(s => <div key={s.l} className="rounded-lg p-3" style={{ backgroundColor: "#F8FAFC" }}><div className="text-lg font-bold" style={{ color: s.c }}>{s.v}</div><div className="text-xs" style={{ color: MUTED }}>{s.l}</div></div>)}

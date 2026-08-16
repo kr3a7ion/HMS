@@ -68,7 +68,7 @@ export function GroupBookings({ add }: { add: (t: Omit<Toast, "id">) => void }) 
   const createGroup = () => {
     if (!newGroup.name || !newGroup.contact) { add({ type: "warning", title: "Fill in group name and contact" }); return; }
     setShowCreate(false);
-    add({ type: "success", title: "Group booking created", body: `${newGroup.name} · ${newGroup.rooms} rooms · ${newGroup.type}` });
+    add({ type: "info", title: "Not available yet — group bookings need B12", body: `${newGroup.name} · ${newGroup.rooms} rooms · ${newGroup.type}` });
     setNewGroup({ name: "", type: "Corporate", contact: "", rooms: "5", checkin: "", checkout: "" });
   };
 

@@ -93,7 +93,7 @@ export function OccupancyReports() {
           {data.occupancyByRoomType.length === 0 ? <EmptyState icon={BedDouble} message="No room types configured." /> : data.occupancyByRoomType.map(r => <div key={r.type} className="mb-4"><div className="flex items-center justify-between text-sm mb-1.5"><span style={{ color: TEXT }}>{r.type}</span><span className="font-bold" style={{ color: PRIMARY }}>{r.occupancy}%</span></div><div className="h-2.5 rounded-full overflow-hidden" style={{ backgroundColor: "#F1F5F9" }}><div className="h-full rounded-full" style={{ width: `${Math.min(r.occupancy, 100)}%`, backgroundColor: PRIMARY }} /></div></div>)}
           <div className="mt-4 pt-4 border-t" style={{ borderColor: "#F1F5F9" }}>
             <div className="text-sm font-semibold mb-2" style={{ color: TEXT }}>Key Metrics</div>
-            {[["ADR", `₦${data.adr.toLocaleString()}`], ["RevPAR", `₦${data.revpar.toLocaleString()}`]].map(([k, v]) => <div key={k} className="flex justify-between text-sm mb-1.5"><span style={{ color: MUTED }}>{k}</span><span className="font-semibold" style={{ color: TEXT }}>{v}</span></div>)}
+            {[["ADR", `₦${data.adrKobo.toLocaleString()}`], ["RevPAR", `₦${data.revparKobo.toLocaleString()}`]].map(([k, v]) => <div key={k} className="flex justify-between text-sm mb-1.5"><span style={{ color: MUTED }}>{k}</span><span className="font-semibold" style={{ color: TEXT }}>{v}</span></div>)}
           </div>
         </div>
       </div>

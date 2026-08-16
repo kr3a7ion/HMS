@@ -47,7 +47,7 @@ export function BranchComparison({ add }: { add: AddToast }) {
             <div className="bg-white rounded-xl border p-5" style={{ borderColor: BORDER }}>
               <h3 className="text-sm font-semibold mb-4" style={{ color: TEXT }}>Revenue Today (₦) by Branch</h3>
               <ResponsiveContainer width="100%" height={200}>
-                <BarChart data={branches.map(b => ({ name: b.branchName, rev: b.revenueToday ?? 0 }))} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+                <BarChart data={branches.map(b => ({ name: b.branchName, rev: b.revenueTodayKobo ?? 0 }))} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
                   <XAxis dataKey="name" tick={{ fontSize: 11, fill: SUBTLE }} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fontSize: 11, fill: SUBTLE }} axisLine={false} tickLine={false} />
@@ -62,9 +62,9 @@ export function BranchComparison({ add }: { add: AddToast }) {
             <table className="w-full"><thead><tr style={{ backgroundColor: "#F8FAFC" }}>{["Metric", ...branches.map(b => b.branchName)].map(h => <th key={h} className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider" style={{ color: MUTED }}>{h}</th>)}</tr></thead>
               <tbody>{[
                 { metric: "Occupancy %", fmt: (b: CachedBranch) => b.occupancyRate != null ? `${b.occupancyRate}%` : "—" },
-                { metric: "Revenue Today (₦)", fmt: (b: CachedBranch) => b.revenueToday != null ? `₦${b.revenueToday.toLocaleString()}` : "—" },
-                { metric: "ADR (₦)", fmt: (b: CachedBranch) => b.adr != null ? `₦${b.adr.toLocaleString()}` : "—" },
-                { metric: "RevPAR (₦)", fmt: (b: CachedBranch) => b.revpar != null ? `₦${b.revpar.toLocaleString()}` : "—" },
+                { metric: "Revenue Today (₦)", fmt: (b: CachedBranch) => b.revenueTodayKobo != null ? `₦${b.revenueTodayKobo.toLocaleString()}` : "—" },
+                { metric: "ADR (₦)", fmt: (b: CachedBranch) => b.adrKobo != null ? `₦${b.adrKobo.toLocaleString()}` : "—" },
+                { metric: "RevPAR (₦)", fmt: (b: CachedBranch) => b.revparKobo != null ? `₦${b.revparKobo.toLocaleString()}` : "—" },
                 { metric: "Open Issues", fmt: (b: CachedBranch) => b.openIssues ?? "—" },
               ].map(row => <tr key={row.metric} className="border-t hover:bg-[#FAFBFD]" style={{ borderColor: "#F1F5F9" }}><td className="px-5 py-3 text-sm font-medium" style={{ color: TEXT }}>{row.metric}</td>{branches.map(b => <td key={b.branchId} className="px-5 py-3 text-sm font-bold" style={{ color: PRIMARY }}>{row.fmt(b)}</td>)}</tr>)}</tbody>
             </table>

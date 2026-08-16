@@ -100,7 +100,7 @@ export function WalkInReg({ add }: { add: (t: Omit<Toast, "id">) => void }) {
               <div className="flex justify-center gap-3"><BtnO label="Print Receipt" icon={FileText} /><BtnO label="Activate Room Access" icon={Lock} /></div>
             </div>
           )}
-          {step === 1 && <BtnP label="Register & Check In →" icon={CheckCircle2} onClick={() => { setStep(2); add({ type: "success", title: "Walk-in registered", body: "BK-2860 created · Room 102" }); }} />}
+          {step === 1 && <BtnP label="Register & Check In →" icon={CheckCircle2} onClick={() => { setStep(2); add({ type: "info", title: "Not available yet — this screen is not wired to the walk-in endpoint", body: "No reservation was created" }); }} />}
         </div>
         <div className="bg-white rounded-xl border p-5 h-fit" style={{ borderColor: BORDER }}>
           <h3 className="text-sm font-semibold mb-3" style={{ color: TEXT }}>Summary</h3>

@@ -2,6 +2,8 @@
 // credentials so the httpOnly session cookie set by /auth/login travels
 // with it — see server/src/auth for what's actually enforced server-side.
 // Nothing here should ever hold a JWT in JS-readable storage.
+import { reportReachable, reportUnreachable } from "./connection";
+
 const API_BASE = (import.meta as any).env?.VITE_API_BASE_URL ?? "http://localhost:4000";
 
 export class ApiError extends Error {
@@ -28,8 +30,16 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       headers: { "Content-Type": "application/json", ...options.headers },
     });
   } catch {
+    // This request never reached the server. That is the ONLY trustworthy
+    // signal that the property is offline -- navigator.onLine reports the OS
+    // interface, which stays "online" when the LAN is fine but the local
+    // server has stopped, the exact case staff actually hit.
+    reportUnreachable();
     throw new NetworkError(`Could not reach the local server at ${API_BASE}`);
   }
+  // Reached the server. A 4xx/5xx still proves reachability, so this is
+  // recorded before the status check, not after.
+  reportReachable();
 
   if (!res.ok) {
     let body: any = {};
@@ -51,6 +61,16 @@ export interface AuthUser {
   id: string; email: string; role: string;
   firstName: string; lastName: string;
   branchId: string; organizationId: string;
+  /**
+   * The role's effective permission keys, or "*" for full access. Supplied by
+   * GET /auth/me so <RoleGate> can hide actions the server would refuse.
+   *
+   * Optional because a cached session from before this field existed will not
+   * have it. Treat a missing value as "no permissions known" and fall back to
+   * showing the action — the server still enforces, so the worst case is a
+   * 403 the user can see, not an action they shouldn't have.
+   */
+  permissions?: string[] | "*";
 }
 
 export interface Room {
@@ -78,27 +98,27 @@ export interface Guest {
 export interface ReservationListItem {
   id: string; guestId: string; roomId: string | null;
   checkInDate: string; checkOutDate: string; status: string;
-  rate: number; adults: number; children: number; specialRequests: string | null;
+  rateKobo: number; adults: number; children: number; specialRequests: string | null;
   guestFirstName: string | null; guestLastName: string | null; roomNumber: string | null;
 }
 
 export interface FolioCharge {
   id: string; reservationId: string; category: string; description: string;
-  quantity: number; unitPrice: number; amount: number; postedBy: string; postedAt: string;
+  quantity: number; unitPriceKobo: number; amountKobo: number; postedBy: string; postedAt: string;
 }
 
 export interface Payment {
-  id: string; reservationId: string; amount: number; method: string; receivedBy: string; receivedAt: string;
+  id: string; reservationId: string; amountKobo: number; method: string; receivedBy: string; receivedAt: string;
 }
 
 export interface FolioSummary {
-  charges: FolioCharge[]; payments: Payment[]; totalCharges: number; totalPaid: number; balance: number;
+  charges: FolioCharge[]; payments: Payment[]; totalChargesKobo: number; totalPaidKobo: number; balanceKobo: number;
 }
 
 export interface ReservationDetail {
   id: string; branchId: string; guestId: string; roomId: string | null;
   checkInDate: string; checkOutDate: string; status: string;
-  rate: number; adults: number; children: number; specialRequests: string | null;
+  rateKobo: number; adults: number; children: number; specialRequests: string | null;
   createdBy: string; createdAt: string;
   guest: Guest; room: Room | null; folio: FolioSummary;
 }
@@ -140,7 +160,7 @@ export interface LostFoundItem {
 }
 
 export interface MenuItem {
-  id: string; categoryId: string; name: string; price: number; available: boolean;
+  id: string; categoryId: string; name: string; priceKobo: number; available: boolean;
 }
 export interface MenuCategory {
   id: string; name: string; sortOrder: number; items: MenuItem[];
@@ -149,14 +169,14 @@ export interface RestaurantTable {
   id: string; label: string; seats: number; status: "available" | "occupied" | "reserved" | "dirty";
 }
 export interface OrderItem {
-  id: string; menuItemId: string; name: string; quantity: number; unitPrice: number; status: "pending" | "ready" | "served";
+  id: string; menuItemId: string; name: string; quantity: number; unitPriceKobo: number; status: "pending" | "ready" | "served";
 }
 export interface RestaurantOrder {
   id: string; tableId: string | null; roomReservationId: string | null; status: "open" | "sent_to_kitchen" | "served" | "closed";
   createdAt: string; closedAt: string | null; tableLabel?: string | null; items: OrderItem[]; total: number;
 }
 export interface RoomCharge {
-  id: string; reservationId: string; description: string; amount: number; postedAt: string;
+  id: string; reservationId: string; description: string; amountKobo: number; postedAt: string;
   guestFirstName: string | null; guestLastName: string | null; roomNumber: string | null;
 }
 
@@ -164,7 +184,7 @@ export interface RoomCharge {
 export const restaurantApi = {
   getMenu: () => api.get<MenuCategory[]>("/restaurant/menu"),
   createCategory: (name: string) => api.post<{ id: string }>("/restaurant/menu/categories", { name }),
-  createItem: (categoryId: string, name: string, price: number) => api.post<{ id: string }>("/restaurant/menu/items", { categoryId, name, price }),
+  createItem: (categoryId: string, name: string, priceKobo: number) => api.post<{ id: string }>("/restaurant/menu/items", { categoryId, name, priceKobo }),
   setItemAvailability: (id: string, available: boolean) => api.post<{ ok: true }>(`/restaurant/menu/items/${id}/availability`, { available }),
 
   listTables: () => api.get<RestaurantTable[]>("/restaurant/tables"),
@@ -286,7 +306,7 @@ export const shiftHandoverApi = {
 
 export interface Product {
   id: string; itemCode: string; name: string; category: string; unit: string;
-  currentStock: number; parLevel: number; reorderThreshold: number; unitCost: number;
+  currentStock: number; parLevel: number; reorderThreshold: number; unitCostKobo: number;
   location: string | null; updatedAt: string;
 }
 export interface StockTransaction {
@@ -309,13 +329,13 @@ export interface PurchaseOrderListItem {
 }
 export interface PurchaseOrderDetail extends PurchaseOrderListItem {
   supplier: Supplier | null;
-  items: Array<{ id: string; quantity: number; unitCost: number; productId: string; productName: string | null; productUnit: string | null }>;
+  items: Array<{ id: string; quantity: number; unitCostKobo: number; productId: string; productName: string | null; productUnit: string | null }>;
 }
 
 // ─── Inventory (IV-01..05, HK-06) ───────────────────────────────────────────
 export const inventoryApi = {
   listProducts: (category?: string) => api.get<Product[]>(`/inventory/products${category ? `?category=${encodeURIComponent(category)}` : ""}`),
-  createProduct: (input: { itemCode: string; name: string; category: string; unit: string; parLevel: number; reorderThreshold: number; unitCost: number; location?: string; initialStock?: number }) =>
+  createProduct: (input: { itemCode: string; name: string; category: string; unit: string; parLevel: number; reorderThreshold: number; unitCostKobo: number; location?: string; initialStock?: number }) =>
     api.post<{ id: string }>("/inventory/products", input),
   adjustProduct: (id: string, input: { type: "in" | "out" | "adjustment"; quantity: number; reference?: string }) =>
     api.post<Product>(`/inventory/products/${id}/adjust`, input),
@@ -329,7 +349,7 @@ export const inventoryApi = {
     api.post<{ id: string }>("/inventory/suppliers", input),
 
   listPurchaseOrders: () => api.get<PurchaseOrderListItem[]>("/inventory/purchase-orders"),
-  createPurchaseOrder: (input: { supplierId: string; items: Array<{ productId: string; quantity: number; unitCost: number }> }) =>
+  createPurchaseOrder: (input: { supplierId: string; items: Array<{ productId: string; quantity: number; unitCostKobo: number }> }) =>
     api.post<{ id: string; poNumber: string }>("/inventory/purchase-orders", input),
   getPurchaseOrder: (id: string) => api.get<PurchaseOrderDetail>(`/inventory/purchase-orders/${id}`),
   sendPurchaseOrder: (id: string) => api.post<{ ok: true }>(`/inventory/purchase-orders/${id}/send`),
@@ -348,7 +368,7 @@ export interface StaffMember {
   id: string; email: string; role: string; firstName: string; lastName: string; status: string;
   employeeId: string | null; department: string | null; phone: string | null;
   emergencyContactName: string | null; emergencyContactPhone: string | null;
-  startDate: string | null; payRate: number | null; contractType: string | null; createdAt: string;
+  startDate: string | null; payRateKobo: number | null; contractType: string | null; createdAt: string;
 }
 export interface StaffDetail extends StaffMember {
   notes: Array<{ id: string; note: string; createdAt: string; createdByFirstName: string | null; createdByLastName: string | null }>;
@@ -384,14 +404,14 @@ export const hrApi = {
     const params = new URLSearchParams(filters as Record<string, string>).toString();
     return api.get<StaffMember[]>(`/hr/staff${params ? `?${params}` : ""}`);
   },
-  createStaff: (input: { email: string; firstName: string; lastName: string; role: string; department: string; phone?: string; payRate?: number; contractType?: string }) =>
+  createStaff: (input: { email: string; firstName: string; lastName: string; role: string; department: string; phone?: string; payRateKobo?: number; contractType?: string }) =>
     api.post<{ id: string; employeeId: string; tempPassword: string }>("/hr/staff", input),
   getStaff: (id: string) => api.get<StaffDetail>(`/hr/staff/${id}`),
   updateStaff: (id: string, input: { department?: string; phone?: string; emergencyContactName?: string; emergencyContactPhone?: string; role?: string; contractType?: string }) =>
     api.post<StaffMember>(`/hr/staff/${id}/update`, input),
   deactivateStaff: (id: string) => api.post<{ ok: true }>(`/hr/staff/${id}/deactivate`),
   resetPassword: (id: string) => api.post<{ tempPassword: string }>(`/hr/staff/${id}/reset-password`),
-  adjustPayRate: (id: string, payRate: number) => api.post<{ ok: true }>(`/hr/staff/${id}/pay-rate`, { payRate }),
+  adjustPayRate: (id: string, payRateKobo: number) => api.post<{ ok: true }>(`/hr/staff/${id}/pay-rate`, { payRateKobo }),
   addNote: (id: string, note: string) => api.post<{ ok: true }>(`/hr/staff/${id}/notes`, { note }),
 
   attendance: (start?: string, end?: string) => api.get<AttendanceData>(`/hr/attendance${start && end ? `?start=${start}&end=${end}` : ""}`),
@@ -426,13 +446,13 @@ export interface OccupancyReport {
   start: string; end: string; avgOccupancy: number; noShowRate: number; cancellationRate: number; avgLengthOfStay: number;
   occupancyByDay: Array<{ date: string; occupancy: number }>;
   occupancyByRoomType: Array<{ type: string; occupancy: number }>;
-  adr: number; revpar: number;
+  adrKobo: number; revparKobo: number;
 }
 export interface RevenueReport {
-  start: string; end: string; totalRevenue: number; changeVsPreviousPeriod: number | null;
-  revenueByDay: Array<{ date: string; amount: number }>;
-  revenueByCategory: Array<{ category: string; amount: number }>;
-  adr: number; revpar: number;
+  start: string; end: string; totalRevenueKobo: number; changeVsPreviousPeriod: number | null;
+  revenueByDay: Array<{ date: string; amountKobo: number }>;
+  revenueByCategory: Array<{ category: string; amountKobo: number }>;
+  adrKobo: number; revparKobo: number;
 }
 export interface DepartmentReport {
   department: string; start: string; end: string; metrics: Record<string, any>;
@@ -444,7 +464,7 @@ export interface GuestAnalyticsReport {
 }
 export interface InventoryReport {
   start: string; end: string; totalStockValue: number; criticalItems: number; lowStockItems: number;
-  supplierSpend: Array<{ supplier: string; amount: number }>; totalSupplierSpend: number;
+  supplierSpend: Array<{ supplier: string; amountKobo: number }>; totalSupplierSpendKobo: number;
   consumptionByCategory: Array<{ category: string; value: number }>;
   stockStatusByCategory: Array<{ category: string; ok: number; low: number; critical: number }>;
 }
@@ -568,9 +588,9 @@ export interface ActivityEvent {
 }
 export interface RoleDashboard { role: string; stats: DashboardStat[]; recentActivity: ActivityEvent[] }
 export interface ManagementOverview {
-  occupancyRate: number; revpar: number; inHouseCount: number; arrivalsToday: number; departuresToday: number;
-  revenueToday: number; revenueByCategory: Array<{ category: string; amount: number }>;
-  occupancyTrend: Array<{ date: string; occupancy: number }>; revenueTrend: Array<{ date: string; revenue: number }>;
+  occupancyRate: number; revparKobo: number; inHouseCount: number; arrivalsToday: number; departuresToday: number;
+  revenueTodayKobo: number; revenueByCategory: Array<{ category: string; amountKobo: number }>;
+  occupancyTrend: Array<{ date: string; occupancy: number }>; revenueTrend: Array<{ date: string; revenueKobo: number }>;
   roomStatus: Array<{ status: string; count: number }>; roomsTotal: number;
   departmentKpis: Array<{ department: string; metric: string; value: number | string; status: "success" | "warning" | "error" }>;
   recentActivity: ActivityEvent[];
@@ -586,8 +606,8 @@ export const dashboardApi = {
 // record-level replication with conflict resolution. See
 // server/src/routes/sync.ts and ROADMAP.md.
 export interface CachedBranch {
-  branchId: string; branchName: string; occupancyRate: number | null; revenueToday: number | null;
-  activeGuests: number | null; openIssues: number | null; roomsTotal: number | null; adr: number | null; revpar: number | null;
+  branchId: string; branchName: string; occupancyRate: number | null; revenueTodayKobo: number | null;
+  activeGuests: number | null; openIssues: number | null; roomsTotal: number | null; adrKobo: number | null; revparKobo: number | null;
   branchManagerName: string | null; lastSyncAt: string | null; lastSyncStatus: string | null; snapshotAt: string | null; cachedAt: string;
 }
 export interface SyncStatus {
@@ -611,14 +631,14 @@ export interface FinanceFolio {
   id: string; status: string; disputed: boolean;
   checkInDate: string; checkOutDate: string;
   guestFirstName: string | null; guestLastName: string | null; roomNumber: string | null;
-  totalCharges: number; totalPaid: number; balance: number;
+  totalChargesKobo: number; totalPaidKobo: number; balanceKobo: number;
   folioStatus: "open" | "closed" | "disputed";
 }
 
 export interface DailySummary {
-  date: string; totalRevenue: number; transactionCount: number;
-  revenueByCategory: Array<{ category: string; amount: number; txn: number }>;
-  paymentsByMethod: Array<{ method: string; amount: number }>;
+  date: string; totalRevenueKobo: number; transactionCount: number;
+  revenueByCategory: Array<{ category: string; amountKobo: number; txn: number }>;
+  paymentsByMethod: Array<{ method: string; amountKobo: number }>;
   totalPayments: number; outstandingBalance: number;
 }
 
@@ -699,7 +719,7 @@ export interface CreateReservationInput {
   roomId?: string;
   checkInDate: string;
   checkOutDate: string;
-  rate: number;
+  rateKobo: number;
   adults?: number;
   children?: number;
   specialRequests?: string;
@@ -710,9 +730,9 @@ export const reservationsApi = {
   create: (input: CreateReservationInput) => api.post<ReservationListItem>("/reservations", input),
   get: (id: string) => api.get<ReservationDetail>(`/reservations/${id}`),
   checkIn: (id: string, roomId?: string) => api.post<ReservationListItem>(`/reservations/${id}/check-in`, roomId ? { roomId } : {}),
-  postCharge: (id: string, charge: { category: string; description: string; quantity?: number; unitPrice: number }) =>
+  postCharge: (id: string, charge: { category: string; description: string; quantity?: number; unitPriceKobo: number }) =>
     api.post<FolioSummary>(`/reservations/${id}/folio/charges`, charge),
-  checkOut: (id: string, payment?: { paymentAmount: number; paymentMethod: "cash" | "card" | "transfer" }) =>
+  checkOut: (id: string, payment?: { paymentAmountKobo: number; paymentMethod: "cash" | "card" | "transfer" }) =>
     api.post<{ reservationId: string; status: string; folio: FolioSummary; accessRevoked: { revoked: number; queued: number; failed: number } }>(`/reservations/${id}/check-out`, payment ?? {}),
 };
 

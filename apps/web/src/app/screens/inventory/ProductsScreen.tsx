@@ -56,6 +56,7 @@ import {
 import {
   Badge, EmptyState, ToastC, LiveClock, SyncPill, StatCard, PageHeader, BtnP, BtnO, Inp, Sel, PlaceholderScreen,
 } from "../../Screens";
+import { toKobo, formatNaira } from "../../lib/money";
 
 export function ProductsScreen({ add }: { add: AddToast }) {
   const [products, setProducts] = useState<Product[]>([]);
@@ -78,7 +79,7 @@ export function ProductsScreen({ add }: { add: AddToast }) {
     try {
       await inventoryApi.createProduct({
         itemCode: newItem.itemCode, name: newItem.name, category: newItem.category, unit: newItem.unit,
-        parLevel: Number(newItem.parLevel), reorderThreshold: Number(newItem.reorderThreshold), unitCost: Number(newItem.unitCost),
+        parLevel: Number(newItem.parLevel), reorderThreshold: Number(newItem.reorderThreshold), unitCostKobo: toKobo(Number(newItem.unitCost)),
         initialStock: newItem.initialStock ? Number(newItem.initialStock) : undefined,
       });
       add({ type: "success", title: `${newItem.name} added` });
@@ -113,7 +114,7 @@ export function ProductsScreen({ add }: { add: AddToast }) {
           <table className="w-full"><thead><tr style={{ backgroundColor: "#F8FAFC" }}>{["Code", "Name", "Category", "Unit", "Stock", "Par Level", "Reorder Point", "Unit Cost", ""].map(h => <th key={h} className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider" style={{ color: MUTED }}>{h}</th>)}</tr></thead>
             <tbody>{filtered.map(p => {
               const low = p.currentStock <= p.reorderThreshold;
-              return <tr key={p.id} className="border-t hover:bg-[#FAFBFD]" style={{ borderColor: "#F1F5F9" }}><td className="px-5 py-3 text-xs" style={{ color: MUTED, fontFamily: mono }}>{p.itemCode}</td><td className="px-5 py-3 text-sm font-medium" style={{ color: TEXT }}>{p.name}</td><td className="px-5 py-3 text-xs" style={{ color: MUTED }}>{p.category}</td><td className="px-5 py-3 text-xs" style={{ color: MUTED }}>{p.unit}</td><td className="px-5 py-3"><span className="text-sm font-bold" style={{ color: low ? ERROR : TEXT }}>{p.currentStock}</span>{low && <span className="ml-1 text-xs" style={{ color: ERROR }}>↓ low</span>}</td><td className="px-5 py-3 text-sm" style={{ color: MUTED }}>{p.parLevel}</td><td className="px-5 py-3 text-sm" style={{ color: MUTED }}>{p.reorderThreshold}</td><td className="px-5 py-3 text-sm" style={{ color: TEXT }}>₦{p.unitCost.toLocaleString()}</td><td className="px-5 py-3"><button onClick={() => { setAdjustTarget(p); setAdjustForm({ type: "adjustment", quantity: String(p.currentStock), reference: "" }); }} className="text-xs px-2 py-1 rounded border" style={{ color: TEAL, borderColor: `${TEAL}30` }}>Adjust</button></td></tr>;
+              return <tr key={p.id} className="border-t hover:bg-[#FAFBFD]" style={{ borderColor: "#F1F5F9" }}><td className="px-5 py-3 text-xs" style={{ color: MUTED, fontFamily: mono }}>{p.itemCode}</td><td className="px-5 py-3 text-sm font-medium" style={{ color: TEXT }}>{p.name}</td><td className="px-5 py-3 text-xs" style={{ color: MUTED }}>{p.category}</td><td className="px-5 py-3 text-xs" style={{ color: MUTED }}>{p.unit}</td><td className="px-5 py-3"><span className="text-sm font-bold" style={{ color: low ? ERROR : TEXT }}>{p.currentStock}</span>{low && <span className="ml-1 text-xs" style={{ color: ERROR }}>↓ low</span>}</td><td className="px-5 py-3 text-sm" style={{ color: MUTED }}>{p.parLevel}</td><td className="px-5 py-3 text-sm" style={{ color: MUTED }}>{p.reorderThreshold}</td><td className="px-5 py-3 text-sm" style={{ color: TEXT }}>{formatNaira(p.unitCostKobo)}</td><td className="px-5 py-3"><button onClick={() => { setAdjustTarget(p); setAdjustForm({ type: "adjustment", quantity: String(p.currentStock), reference: "" }); }} className="text-xs px-2 py-1 rounded border" style={{ color: TEAL, borderColor: `${TEAL}30` }}>Adjust</button></td></tr>;
             })}</tbody>
           </table>
         )}

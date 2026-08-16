@@ -56,6 +56,7 @@ import {
 import {
   Badge, EmptyState, ToastC, LiveClock, SyncPill, StatCard, PageHeader, BtnP, BtnO, Inp, Sel, PlaceholderScreen,
 } from "../../Screens";
+import { toKobo, formatNaira } from "../../lib/money";
 
 const HR_DEPARTMENTS = ["Management", "Front Desk", "Housekeeping", "Maintenance", "Finance", "Restaurant"];
 const staffStatusColors: Record<string, { bg: string; text: string }> = {
@@ -82,7 +83,7 @@ export function StaffDirectory({ add }: { add: AddToast }) {
   const create = async () => {
     if (!form.email.trim() || !form.firstName.trim() || !form.lastName.trim()) { add({ type: "error", title: "Email, first name, and last name are required" }); return; }
     try {
-      const res = await hrApi.createStaff({ email: form.email, firstName: form.firstName, lastName: form.lastName, role: form.role, department: form.department, phone: form.phone || undefined, payRate: form.payRate ? Number(form.payRate) : undefined, contractType: form.contractType });
+      const res = await hrApi.createStaff({ email: form.email, firstName: form.firstName, lastName: form.lastName, role: form.role, department: form.department, phone: form.phone || undefined, payRateKobo: form.payRate ? toKobo(Number(form.payRate)) : undefined, contractType: form.contractType });
       add({ type: "success", title: `${form.firstName} ${form.lastName} added — ${res.employeeId}`, body: `Temp password: ${res.tempPassword}` });
       setShowCreate(false);
       setForm({ email: "", firstName: "", lastName: "", role: "FD", department: "Front Desk", phone: "", payRate: "", contractType: "Full-time" });

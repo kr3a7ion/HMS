@@ -56,6 +56,7 @@ import {
 import {
   Badge, EmptyState, ToastC, LiveClock, SyncPill, StatCard, PageHeader, BtnP, BtnO, Inp, Sel, PlaceholderScreen,
 } from "../../Screens";
+import { toKobo, formatNaira } from "../../lib/money";
 
 export function NewReservation({ add }: { add: AddToast }) {
   const navigate = useNavigate();
@@ -99,7 +100,7 @@ export function NewReservation({ add }: { add: AddToast }) {
         roomId: roomId || undefined,
         checkInDate: new Date(checkInDate).toISOString(),
         checkOutDate: new Date(checkOutDate).toISOString(),
-        rate: Number(rate),
+        rateKobo: toKobo(Number(rate)),
         adults: Number(adults),
         children: Number(children),
         specialRequests: specialRequests || undefined,

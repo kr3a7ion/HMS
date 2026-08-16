@@ -56,6 +56,7 @@ import {
 import {
   Badge, EmptyState, ToastC, LiveClock, SyncPill, StatCard, PageHeader, BtnP, BtnO, Inp, Sel, PlaceholderScreen,
 } from "../../Screens";
+import { toKobo, formatNaira } from "../../lib/money";
 
 export function CheckOut({ add }: { add: AddToast }) {
   const params = useParams();
@@ -105,11 +106,11 @@ export function CheckOut({ add }: { add: AddToast }) {
   const settle = async () => {
     setSettling(true); setError("");
     try {
-      await reservationsApi.checkOut(detail.id, Number(cash) > 0 ? { paymentAmount: Number(cash), paymentMethod: method } : undefined);
+      await reservationsApi.checkOut(detail.id, Number(cash) > 0 ? { paymentAmountKobo: toKobo(Number(cash)), paymentMethod: method } : undefined);
       add({ type: "success", title: "Check-out complete", body: `Room ${detail.room?.number} released to Housekeeping.` });
       navigate("/reservations/grid");
     } catch (err: any) {
-      if (err?.code === "BALANCE_REMAINING") setError(`Balance of ₦${err.details?.balance?.toLocaleString?.() ?? err.details?.balance} still remains — collect payment before releasing the room.`);
+      if (err?.code === "BALANCE_REMAINING") setError(`Balance of ₦${err.details?.balanceKobo?.toLocaleString?.() ?? err.details?.balanceKobo} still remains — collect payment before releasing the room.`);
       else setError("Couldn't complete check-out. Please try again.");
     } finally {
       setSettling(false);
@@ -127,14 +128,14 @@ export function CheckOut({ add }: { add: AddToast }) {
             <table className="w-full"><thead><tr style={{ backgroundColor: "#F8FAFC" }}>{["Category", "Description", "Qty", "Unit", "Amount"].map(h => <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wider" style={{ color: MUTED }}>{h}</th>)}</tr></thead>
               <tbody>{folio.charges.length === 0
                 ? <tr><td colSpan={5}><EmptyState icon={FileText} message="No charges posted yet." /></td></tr>
-                : folio.charges.map(c => <tr key={c.id} className="border-t hover:bg-[#FAFBFD]" style={{ borderColor: "#F1F5F9" }}><td className="px-4 py-3"><span className="text-xs px-1.5 py-0.5 rounded" style={{ backgroundColor: "#F1F5F9", color: MUTED }}>{c.category}</span></td><td className="px-4 py-3 text-sm" style={{ color: TEXT }}>{c.description}</td><td className="px-4 py-3 text-sm text-center" style={{ color: MUTED }}>{c.quantity}</td><td className="px-4 py-3 text-sm" style={{ color: MUTED }}>₦{c.unitPrice.toLocaleString()}</td><td className="px-4 py-3 text-sm font-semibold" style={{ color: TEXT }}>₦{c.amount.toLocaleString()}</td></tr>)}
+                : folio.charges.map(c => <tr key={c.id} className="border-t hover:bg-[#FAFBFD]" style={{ borderColor: "#F1F5F9" }}><td className="px-4 py-3"><span className="text-xs px-1.5 py-0.5 rounded" style={{ backgroundColor: "#F1F5F9", color: MUTED }}>{c.category}</span></td><td className="px-4 py-3 text-sm" style={{ color: TEXT }}>{c.description}</td><td className="px-4 py-3 text-sm text-center" style={{ color: MUTED }}>{c.quantity}</td><td className="px-4 py-3 text-sm" style={{ color: MUTED }}>{formatNaira(c.unitPriceKobo)}</td><td className="px-4 py-3 text-sm font-semibold" style={{ color: TEXT }}>{formatNaira(c.amountKobo)}</td></tr>)}
               </tbody>
             </table>
             <div className="px-5 py-4 border-t" style={{ borderColor: BORDER, backgroundColor: "#F8FAFC" }}>
               <div className="flex justify-end"><div className="w-64 space-y-1.5 text-sm">
-                <div className="flex justify-between"><span style={{ color: MUTED }}>Total charges</span><span>₦{folio.totalCharges.toLocaleString()}</span></div>
-                <div className="flex justify-between"><span style={{ color: MUTED }}>Paid so far</span><span style={{ color: SUCCESS }}>−₦{folio.totalPaid.toLocaleString()}</span></div>
-                <div className="flex justify-between font-bold text-base pt-2 border-t" style={{ borderColor: BORDER, color: TEXT }}><span>Balance Due</span><span>₦{folio.balance.toLocaleString()}</span></div>
+                <div className="flex justify-between"><span style={{ color: MUTED }}>Total charges</span><span>{formatNaira(folio.totalChargesKobo)}</span></div>
+                <div className="flex justify-between"><span style={{ color: MUTED }}>Paid so far</span><span style={{ color: SUCCESS }}>{formatNaira(folio.totalPaidKobo)}</span></div>
+                <div className="flex justify-between font-bold text-base pt-2 border-t" style={{ borderColor: BORDER, color: TEXT }}><span>Balance Due</span><span>{formatNaira(folio.balanceKobo)}</span></div>
               </div></div>
             </div>
           </div>
@@ -146,7 +147,7 @@ export function CheckOut({ add }: { add: AddToast }) {
         <div className="lg:col-span-2 space-y-4">
           <div className="bg-white rounded-xl border p-5" style={{ borderColor: BORDER }}>
             <h3 className="text-sm font-semibold mb-4" style={{ color: TEXT }}>Payment</h3>
-            <div className="text-3xl font-bold mb-1" style={{ color: TEXT }}>₦{folio.balance.toLocaleString()}</div>
+            <div className="text-3xl font-bold mb-1" style={{ color: TEXT }}>{formatNaira(folio.balanceKobo)}</div>
             <div className="text-xs mb-5" style={{ color: MUTED }}>Balance remaining</div>
             <div className="mb-3"><label className="text-xs font-medium uppercase tracking-wider block mb-1" style={{ color: MUTED }}>Amount Received (₦)</label><input type="number" value={cash} onChange={e => setCash(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm outline-none" style={{ borderColor: BORDER }} /></div>
             <div className="mb-4"><label className="text-xs font-medium uppercase tracking-wider block mb-1" style={{ color: MUTED }}>Method</label>

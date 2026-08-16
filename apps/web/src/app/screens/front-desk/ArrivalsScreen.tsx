@@ -94,7 +94,7 @@ export function ArrivalsScreen({ add, nav }: { add: (t: Omit<Toast, "id">) => vo
               <td className="px-5 py-3 text-sm" style={{ color: MUTED }}>{a.nights}n</td>
               <td className="px-5 py-3">{a.assigned ? <span className="flex items-center gap-1 text-xs" style={{ color: SUCCESS }}><CheckCircle2 size={13} />Assigned</span> : <span className="text-xs font-medium" style={{ color: WARNING }}>Unassigned</span>}</td>
               <td className="px-5 py-3 text-xs" style={{ color: MUTED, maxWidth: 160 }}><span className="line-clamp-1">{a.requests}</span></td>
-              <td className="px-5 py-3"><div className="flex gap-1"><button onClick={() => nav ? nav("check-in", "Check-In") : add({ type: "success", title: "Check-in started", body: a.guest })} className="text-xs px-2.5 py-1.5 rounded-lg border font-medium" style={{ color: PRIMARY, borderColor: `${PRIMARY}30` }}>Check In</button><button className="w-7 h-7 rounded flex items-center justify-center hover:bg-[#F1F5F9]" style={{ color: SUBTLE }}><MoreHorizontal size={13} /></button></div></td>
+              <td className="px-5 py-3"><div className="flex gap-1"><button onClick={() => nav ? nav("check-in", "Check-In") : add({ type: "info", title: "Not available yet — this screen is not wired to check-in", body: a.guest })} className="text-xs px-2.5 py-1.5 rounded-lg border font-medium" style={{ color: PRIMARY, borderColor: `${PRIMARY}30` }}>Check In</button><button className="w-7 h-7 rounded flex items-center justify-center hover:bg-[#F1F5F9]" style={{ color: SUBTLE }}><MoreHorizontal size={13} /></button></div></td>
             </tr>
           ))}</tbody>
         </table>

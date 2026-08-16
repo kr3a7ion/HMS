@@ -56,6 +56,7 @@ import {
 import {
   Badge, EmptyState, ToastC, LiveClock, SyncPill, StatCard, PageHeader, BtnP, BtnO, Inp, Sel, PlaceholderScreen,
 } from "../../Screens";
+import { formatNaira } from "../../lib/money";
 
 export function POSTerminal({ add }: { add: AddToast }) {
   const navigate = useNavigate();
@@ -201,7 +202,7 @@ export function POSTerminal({ add }: { add: AddToast }) {
                   <button key={item.id} disabled={!item.available || activeOrder.status === "closed"} onClick={() => addItem(item.id)}
                     className="p-4 rounded-xl border-2 text-left transition-all hover:shadow-sm disabled:opacity-40" style={{ borderColor: inOrder ? PRIMARY : BORDER, backgroundColor: inOrder ? "#EFF6FF" : "white" }}>
                     <div className="text-sm font-semibold mb-1" style={{ color: TEXT }}>{item.name}{!item.available && " (86'd)"}</div>
-                    <div className="text-base font-bold" style={{ color: PRIMARY }}>₦{item.price.toLocaleString()}</div>
+                    <div className="text-base font-bold" style={{ color: PRIMARY }}>{formatNaira(item.priceKobo)}</div>
                     {inOrder > 0 && <div className="mt-1 text-xs font-medium" style={{ color: TEAL }}>×{inOrder} added</div>}
                   </button>
                 );
@@ -213,7 +214,7 @@ export function POSTerminal({ add }: { add: AddToast }) {
           <div className="px-4 py-3 border-b" style={{ borderColor: BORDER, backgroundColor: "#F8FAFC" }}><div className="text-sm font-semibold" style={{ color: TEXT }}>Current Order</div><div className="text-xs" style={{ color: SUBTLE }}>{activeOrder.items.length === 0 ? "No items yet" : `${activeOrder.items.reduce((s, o) => s + o.quantity, 0)} items`}</div></div>
           <div className="flex-1 overflow-y-auto px-4 py-2" style={{ scrollbarWidth: "none" }}>
             {activeOrder.items.length === 0 ? <div className="flex flex-col items-center justify-center h-full text-center"><ShoppingCart size={28} style={{ color: SUBTLE }} /><p className="text-xs mt-2" style={{ color: SUBTLE }}>Tap menu items to add</p></div>
-              : activeOrder.items.map(o => <div key={o.id} className="flex items-center gap-2 py-2.5 border-b" style={{ borderColor: "#F8FAFC" }}><div className="flex-1 min-w-0"><div className="text-xs font-medium truncate" style={{ color: TEXT }}>{o.name} ×{o.quantity}</div><div className="text-xs capitalize" style={{ color: MUTED }}>{o.status}</div></div><div className="text-sm font-semibold w-16 text-right" style={{ color: TEXT }}>₦{(o.unitPrice * o.quantity).toLocaleString()}</div></div>)}
+              : activeOrder.items.map(o => <div key={o.id} className="flex items-center gap-2 py-2.5 border-b" style={{ borderColor: "#F8FAFC" }}><div className="flex-1 min-w-0"><div className="text-xs font-medium truncate" style={{ color: TEXT }}>{o.name} ×{o.quantity}</div><div className="text-xs capitalize" style={{ color: MUTED }}>{o.status}</div></div><div className="text-sm font-semibold w-16 text-right" style={{ color: TEXT }}>{formatNaira((o.unitPriceKobo * o.quantity))}</div></div>)}
           </div>
           {activeOrder.items.length > 0 && <div className="px-4 py-4 border-t" style={{ borderColor: BORDER }}>
             <div className="flex justify-between font-bold text-base mb-3" style={{ color: TEXT }}><span>Total</span><span>₦{activeOrder.total.toLocaleString()}</span></div>

@@ -16,7 +16,7 @@ import {
 
 // ─── Shared data & types ─────────────────────────────────────────────────────
 import {
-  type Role, type Screen, type Toast, type ToastType,
+  type Role, type Screen, type Toast, type ToastType, type AddToast,
   uid, fmtN,
   mono, sans, NAV_BG, PRIMARY, TEAL, ORANGE, SUCCESS, WARNING, ERROR, BORDER, TEXT, MUTED, SUBTLE,
   NOTIFS, BRANCHES, SCREEN_ROLE_MAP, DOOR_LOCK_SCREENS,
@@ -24,7 +24,10 @@ import {
 import { LoginScreen, ForgotPasswordScreen, ForceChangePasswordScreen } from "./Auth";
 import AdminConsole from "./AdminConsole";
 import OrgPortal from "./OrgPortal";
-import { authApi, settingsApi, doorLockApi, type AuthUser, type ModuleKey, type LockQueueItem } from "./lib/api";
+import { authApi, settingsApi, doorLockApi, syncApi, type AuthUser, type ModuleKey, type LockQueueItem, type SyncStatus } from "./lib/api";
+import { OfflineBanner } from "./components/OfflineBanner";
+import { PermissionProvider } from "./components/RoleGate";
+import { useConnection } from "./lib/connection";
 import { BranchOverview } from "./screens/multi-branch/BranchOverview";
 import { BranchComparison } from "./screens/multi-branch/BranchComparison";
 import { CentralSyncStatus } from "./screens/multi-branch/CentralSyncStatus";
@@ -309,7 +312,75 @@ export default function App() {
   if (authState === "force-change-password") return <ForceChangePasswordScreen onComplete={() => setAuthState("branch")} />;
 
   if (!loggedUser) { setAuthState("login"); return null; }
-  return <NexuraApp initialRole={loggedUser.role as Role} loggedUser={loggedUser} onLogout={handleLogout} />;
+  // UI Adoption F9 — the session's effective permission keys, from
+  // GET /auth/me, so <RoleGate> can hide actions the server would refuse.
+  // Undefined (an older cached session) means "unknown" and fails open; see
+  // components/RoleGate.tsx for why that is the right direction here.
+  return (
+    <PermissionProvider value={loggedUser.permissions}>
+      <NexuraApp initialRole={loggedUser.role as Role} loggedUser={loggedUser} onLogout={handleLogout} />
+    </PermissionProvider>
+  );
+}
+
+// ─── Sync pill (real) ─────────────────────────────────────────────────────────
+// Reports GET /sync/status. Three states worth distinguishing, because they
+// mean different things to whoever is looking at the header:
+//
+//   not configured  -- single-property install, no central server. NORMAL.
+//                      Showing "Offline" here would be wrong; there is
+//                      nothing it is supposed to be connected to.
+//   pending > 0     -- sync works, N records still waiting to go up.
+//   failed          -- the last push errored. This is the one that matters.
+function SyncPillLive({ add }: { add: AddToast }) {
+  const [status, setStatus] = useState<SyncStatus | null>(null);
+  const [syncing, setSyncing] = useState(false);
+
+  const load = useCallback(() => {
+    syncApi.status().then(setStatus).catch(() => { /* pill just stays quiet */ });
+  }, []);
+
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 60_000);
+    return () => clearInterval(t);
+  }, [load]);
+
+  if (!status) return null;
+  if (!status.configured) return null;   // nothing to sync to — say nothing
+
+  const failed = status.lastPushStatus === "error" || status.lastPullStatus === "error";
+  const pending = status.pendingItemCount;
+  const colour = failed ? "#EF4444" : pending > 0 ? "#F59E0B" : "#22C55E";
+  const label = failed ? "Sync failed" : pending > 0 ? `${pending} pending` : "Synced";
+
+  return (
+    <button
+      onClick={async () => {
+        setSyncing(true);
+        try {
+          const r = await syncApi.syncNow();
+          const ok = r.push.ok && r.pull.ok;
+          add({
+            type: ok ? "success" : "error",
+            title: ok ? "Sync complete" : "Sync failed",
+            body: ok ? undefined : (r.push.error ?? r.pull.error ?? undefined),
+          });
+        } catch {
+          add({ type: "error", title: "Sync failed", body: "Couldn't reach the local server." });
+        } finally {
+          setSyncing(false);
+          load();
+        }
+      }}
+      disabled={syncing}
+      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium text-white cursor-pointer hover:opacity-80"
+      style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)" }}
+      title={status.lastPushError ?? (status.lastPushAt ? `Last push ${new Date(status.lastPushAt).toLocaleString()}` : "Never pushed")}>
+      <span className="w-2 h-2 rounded-full" style={{ backgroundColor: colour, boxShadow: `0 0 6px ${colour}` }} />
+      {syncing ? "Syncing…" : label}
+    </button>
+  );
 }
 
 // ─── Nexura App Shell ─────────────────────────────────────────────────────────
@@ -381,7 +452,10 @@ function NexuraApp({ initialRole, loggedUser, onLogout }: { initialRole: Role; l
   const [branchMenuOpen, setBranchMenuOpen] = useState(false);
   const [notifFilter, setNotifFilter] = useState("All");
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [offline, setOffline] = useState(false);
+  // Real connection state, not a simulated toggle. Still consumed by
+  // SessionExpiredModal, which words itself differently when a token expires
+  // with the server unreachable (Nexura_Auth §7.1's offline grace period).
+  const offline = useConnection().state === "offline";
   // Auth event dialogs (Nexura_Auth §6.3, §7.1)
   const [showSessionExpired, setShowSessionExpired] = useState(false);
   const [showPermsChanged, setShowPermsChanged] = useState(false);
@@ -600,18 +674,14 @@ function NexuraApp({ initialRole, loggedUser, onLogout }: { initialRole: Role; l
               <span>Morning</span><span style={{ color: SUBTLE }}>07:00–15:00</span>
             </button>
             <LiveClock />
-            {/* Sync status — toggleable offline simulation */}
-            <button
-              onClick={() => {
-                setOffline(p => !p);
-                add({ type: offline ? "success" : "warning", title: offline ? "Back online — syncing…" : "Simulating offline mode", body: offline ? "5 pending items pushed" : "Changes will queue until reconnected" });
-              }}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium text-white cursor-pointer hover:opacity-80"
-              style={{ backgroundColor: offline ? "rgba(107,114,128,0.2)" : "rgba(34,197,94,0.12)", border: "1px solid rgba(255,255,255,0.1)" }}
-              title={offline ? "Click to go online" : "Click to simulate offline"}>
-              <span className="w-2 h-2 rounded-full" style={{ backgroundColor: offline ? "#6B7280" : "#22C55E", boxShadow: offline ? "none" : "0 0 6px #22C55E" }} />
-              {offline ? "Offline" : "Synced"}
-            </button>
+            {/* Sync status — REAL, from GET /sync/status.
+                This used to be a toggle that flipped a local boolean and
+                toasted "Simulating offline mode" / "5 pending items pushed":
+                a demo prop that told staff a fixed number of items had synced
+                when nothing had. Same class of defect as Phase 0.1's no-op
+                controls. It now reports the actual push state and the actual
+                pending count, and clicking it runs a real sync. */}
+            <SyncPillLive add={add} />
             {/* 6.10 Lock Command Queue Monitor -- only rendered when there's
                 a real pending item, not a decorative fixed count. */}
             {lockQueue.length > 0 && (
@@ -723,18 +793,14 @@ function NexuraApp({ initialRole, loggedUser, onLogout }: { initialRole: Role; l
         {/* Content */}
         <main className="flex-1 overflow-y-auto p-6" style={{ scrollbarWidth: "none" }}>
           <div className="max-w-screen-2xl mx-auto">
-            {offline && (
-              <div className="flex items-center gap-2.5 px-4 py-2.5 rounded-xl mb-5 text-sm font-medium"
-                style={{ backgroundColor: "#FEF3C7", color: "#92400E", border: "1px solid #FDE68A" }}>
-                <WifiOff size={15} />
-                <span>You're offline — showing last synced data. Changes will sync automatically when reconnected.</span>
-                <button onClick={() => { setOffline(false); add({ type: "success", title: "Back online — syncing…" }); }}
-                  className="ml-auto text-xs px-2.5 py-1 rounded-lg font-medium hover:opacity-80"
-                  style={{ backgroundColor: "#F59E0B", color: "white" }}>
-                  Go Online
-                </button>
-              </div>
-            )}
+            {/* UI Adoption F2. Replaces a hand-rolled banner driven by the
+                simulated `offline` boolean, which claimed "Changes will sync
+                automatically when reconnected" — untrue, since there is no
+                client-side write queue. Its "Go Online" button just cleared
+                the local flag. <OfflineBanner> reads the real signal (a
+                request that failed to reach the server) and says what is
+                actually true: nothing can be saved until it is back. */}
+            <OfflineBanner />
             <Routes>
               <Route path="/reservations/grid" element={<ReservationGrid add={add} />} />
               <Route path="/reservations/new" element={<NewReservation add={add} />} />

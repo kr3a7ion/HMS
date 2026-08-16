@@ -80,7 +80,7 @@ export function ReservationSearch({ add, nav }: { add: (t: Omit<Toast, "id">) =>
             <td className="px-5 py-3 text-xs" style={{ color: MUTED }}>{r.checkout}</td>
             <td className="px-5 py-3 text-sm" style={{ color: MUTED }}>{r.nights}n</td>
             <td className="px-5 py-3"><Badge label={r.status} colors={resStC[r.status] ?? { bg: "#F1F5F9", text: "#374151" }} /></td>
-            <td className="px-5 py-3"><div className="flex gap-1"><button onClick={() => nav && nav("reservation-detail", r.id)} className="text-xs px-2.5 py-1.5 rounded-lg border" style={{ color: TEAL, borderColor: `${TEAL}30` }}>View</button>{r.status === "Confirmed" && <button onClick={() => nav ? nav("check-in", "Check-In") : add({ type: "success", title: "Check-in started", body: r.guest })} className="text-xs px-2.5 py-1.5 rounded-lg border" style={{ color: PRIMARY, borderColor: `${PRIMARY}30` }}>Check In</button>}</div></td>
+            <td className="px-5 py-3"><div className="flex gap-1"><button onClick={() => nav && nav("reservation-detail", r.id)} className="text-xs px-2.5 py-1.5 rounded-lg border" style={{ color: TEAL, borderColor: `${TEAL}30` }}>View</button>{r.status === "Confirmed" && <button onClick={() => nav ? nav("check-in", "Check-In") : add({ type: "info", title: "Not available yet — this screen is not wired to check-in", body: r.guest })} className="text-xs px-2.5 py-1.5 rounded-lg border" style={{ color: PRIMARY, borderColor: `${PRIMARY}30` }}>Check In</button>}</div></td>
           </tr>)}</tbody>
         </table>
         {filtered.length === 0 && <EmptyState icon={Search} message="No reservations match your search." />}

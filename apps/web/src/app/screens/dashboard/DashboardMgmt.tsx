@@ -56,6 +56,7 @@ import {
 import {
   Badge, EmptyState, ToastC, LiveClock, SyncPill, StatCard, PageHeader, BtnP, BtnO, Inp, Sel, PlaceholderScreen,
 } from "../../Screens";
+import { formatNaira } from "../../lib/money";
 
 function fmtStat(s: DashboardStat): string {
   if (s.isCurrency) return fmtN(Number(s.value));
@@ -100,8 +101,8 @@ export function DashboardMgmt({ add, nav }: { add: AddToast; nav?: (s: string, l
 
   const occToday = data.occupancyTrend[data.occupancyTrend.length - 1]?.occupancy ?? 0;
   const occYesterday = data.occupancyTrend[data.occupancyTrend.length - 2]?.occupancy ?? 0;
-  const revToday = data.revenueTrend[data.revenueTrend.length - 1]?.revenue ?? 0;
-  const revYesterday = data.revenueTrend[data.revenueTrend.length - 2]?.revenue ?? 0;
+  const revToday = data.revenueTrend[data.revenueTrend.length - 1]?.revenueKobo ?? 0;
+  const revYesterday = data.revenueTrend[data.revenueTrend.length - 2]?.revenueKobo ?? 0;
   const occDelta = pctDelta(occToday, occYesterday);
   const revDelta = pctDelta(revToday, revYesterday);
   const PIE_COLORS = [PRIMARY, TEAL, ORANGE, "#8B5CF6", SUBTLE];
@@ -116,7 +117,7 @@ export function DashboardMgmt({ add, nav }: { add: AddToast; nav?: (s: string, l
         actions={<><BtnO label="Export PDF" icon={Download} onClick={() => window.print()} /><BtnP label="New Reservation" icon={Plus} onClick={() => navigate("/reservations/new")} /></>} />
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <StatCard label="Occupancy Rate" value={`${data.occupancyRate}%`} sub={`${data.inHouseCount} rooms occupied`} delta={occDelta?.text} deltaPositive={occDelta?.positive} icon={Building2} accent={PRIMARY} />
-        <StatCard label="Revenue Today" value={fmtN(data.revenueToday)} sub={`RevPAR ₦${data.revpar.toLocaleString()}`} delta={revDelta?.text} deltaPositive={revDelta?.positive} icon={DollarSign} accent={TEAL} />
+        <StatCard label="Revenue Today" value={fmtN(data.revenueTodayKobo)} sub={`RevPAR ₦${data.revparKobo.toLocaleString()}`} delta={revDelta?.text} deltaPositive={revDelta?.positive} icon={DollarSign} accent={TEAL} />
         <StatCard label="Active Guests" value={String(data.inHouseCount)} sub={`${data.arrivalsToday} arrivals · ${data.departuresToday} departures today`} icon={Users} accent={ORANGE} />
         <StatCard label="Open Issues" value={String(data.departmentKpis.find(k => k.metric === "Open Work Orders")?.value ?? 0)} sub="Open work orders" icon={AlertTriangle} accent={ERROR} />
       </div>
@@ -130,7 +131,7 @@ export function DashboardMgmt({ add, nav }: { add: AddToast; nav?: (s: string, l
             </div>
           </div>
           <ResponsiveContainer width="100%" height={200}>
-            <AreaChart data={data.occupancyTrend.map((t, i) => ({ day: new Date(t.date).toLocaleDateString(undefined, { weekday: "short" }), occ: t.occupancy, rev: data.revenueTrend[i]?.revenue ?? 0 }))} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+            <AreaChart data={data.occupancyTrend.map((t, i) => ({ day: new Date(t.date).toLocaleDateString(undefined, { weekday: "short" }), occ: t.occupancy, rev: data.revenueTrend[i]?.revenueKobo ?? 0 }))} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
               <XAxis dataKey="day" tick={{ fontSize: 11, fill: SUBTLE }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 11, fill: SUBTLE }} axisLine={false} tickLine={false} />
@@ -146,7 +147,7 @@ export function DashboardMgmt({ add, nav }: { add: AddToast; nav?: (s: string, l
           {data.revenueByCategory.length === 0 ? <EmptyState icon={DollarSign} message="No revenue posted yet today." /> : (
             <>
               <ResponsiveContainer width="100%" height={140}><PieChart><Pie key="dash-pie" data={data.revenueByCategory} cx="50%" cy="50%" innerRadius={42} outerRadius={65} paddingAngle={3} dataKey="amount" nameKey="category" stroke="none">{data.revenueByCategory.map((_, i) => <Cell key={`dash-cell-${i}`} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}</Pie><Tooltip formatter={(v: any) => [`₦${v.toLocaleString()}`]} contentStyle={{ border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12 }} /></PieChart></ResponsiveContainer>
-              <div className="space-y-2 mt-2">{data.revenueByCategory.map((c, i) => <div key={c.category} className="flex items-center justify-between"><div className="flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }} /><span className="text-xs" style={{ color: MUTED }}>{c.category}</span></div><span className="text-xs font-semibold" style={{ color: TEXT }}>₦{c.amount.toLocaleString()}</span></div>)}</div>
+              <div className="space-y-2 mt-2">{data.revenueByCategory.map((c, i) => <div key={c.category} className="flex items-center justify-between"><div className="flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }} /><span className="text-xs" style={{ color: MUTED }}>{c.category}</span></div><span className="text-xs font-semibold" style={{ color: TEXT }}>{formatNaira(c.amountKobo)}</span></div>)}</div>
             </>
           )}
         </div>

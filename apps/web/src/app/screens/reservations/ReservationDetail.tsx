@@ -64,7 +64,7 @@ export function ReservationDetail({ add }: { add: (t: Omit<Toast, "id">) => void
   return (
     <div>
       <PageHeader title={`Reservation ${res.id}`} sub={`${res.guest} · Room ${res.room} ${res.type}`}
-        actions={<><BtnO label="Modify" icon={Edit3} /><BtnO label="Cancel" /><BtnP label="Check In" icon={KeyRound} onClick={() => add({ type: "success", title: "Check-in started", body: res.guest })} /></>} />
+        actions={<><BtnO label="Modify" icon={Edit3} /><BtnO label="Cancel" /><BtnP label="Check In" icon={KeyRound} onClick={() => add({ type: "info", title: "Not available yet — this screen is not wired to check-in", body: res.guest })} /></>} />
       <div className="bg-white rounded-xl border overflow-hidden" style={{ borderColor: BORDER }}>
         {/* Status banner */}
         <div className="flex items-center gap-3 px-5 py-3 border-b" style={{ backgroundColor: "#F0FDF4", borderColor: "#BBF7D0" }}>
@@ -106,7 +106,7 @@ export function ReservationDetail({ add }: { add: (t: Omit<Toast, "id">) => void
           {tab === "Notes" && (
             <div>
               <div className="space-y-3 mb-4">{[{ note: "VIP guest — champagne on arrival, fruit basket, high floor preferred. Previous stays: always Suite.", by: "Grace Mensah", ts: "24 Jun 09:22" }].map((n, i) => <div key={i} className="p-4 rounded-xl" style={{ backgroundColor: "#F8FAFC" }}><p className="text-sm" style={{ color: TEXT }}>{n.note}</p><div className="text-xs mt-2" style={{ color: MUTED }}>{n.by} · {n.ts}</div></div>)}</div>
-              <div><textarea className="w-full px-3 py-2.5 border rounded-lg text-sm outline-none resize-none" rows={3} placeholder="Add an internal note…" style={{ borderColor: BORDER }} /><div className="mt-2"><BtnP label="Add Note" icon={Plus} onClick={() => add({ type: "success", title: "Note added" })} /></div></div>
+              <div><textarea className="w-full px-3 py-2.5 border rounded-lg text-sm outline-none resize-none" rows={3} placeholder="Add an internal note…" style={{ borderColor: BORDER }} /><div className="mt-2"><BtnP label="Add Note" icon={Plus} onClick={() => add({ type: "info", title: "Not available yet — the note was not saved" })} /></div></div>
             </div>
           )}
         </div>

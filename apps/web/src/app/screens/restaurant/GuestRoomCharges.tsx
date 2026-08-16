@@ -56,6 +56,7 @@ import {
 import {
   Badge, EmptyState, ToastC, LiveClock, SyncPill, StatCard, PageHeader, BtnP, BtnO, Inp, Sel, PlaceholderScreen,
 } from "../../Screens";
+import { formatNaira } from "../../lib/money";
 
 export function GuestRoomCharges() {
   const navigate = useNavigate();
@@ -80,7 +81,7 @@ export function GuestRoomCharges() {
                 <td className="px-4 py-3 font-bold" style={{ color: PRIMARY }}>{c.roomNumber ?? "—"}</td>
                 <td className="px-4 py-3 text-sm" style={{ color: TEXT }}>{c.guestFirstName} {c.guestLastName}</td>
                 <td className="px-4 py-3 text-sm" style={{ color: TEXT }}>{c.description}</td>
-                <td className="px-4 py-3 text-sm font-bold" style={{ color: TEXT }}>₦{c.amount.toLocaleString()}</td>
+                <td className="px-4 py-3 text-sm font-bold" style={{ color: TEXT }}>{formatNaira(c.amountKobo)}</td>
                 <td className="px-4 py-3 text-xs" style={{ color: SUBTLE, fontFamily: mono }}>{new Date(c.postedAt).toLocaleString()}</td>
               </tr>
             ))}</tbody>

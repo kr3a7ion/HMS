@@ -94,30 +94,49 @@ have run *parallel to Phase 2*; it never started. Every adopted screen depends
 on it, and retrofitting after 100+ screens exist is the single most expensive
 mistake available here (Doc 3 §2.3).
 
-- [ ] **F1 — Adaptive tiers (T1–T4).** Doc 3: *"the most important UI decision
-      you have to make"*. Tier is a LAYOUT decision, not a component fork — one
-      component, tier-aware primitives.
-- [ ] **F2 — `<OfflineBanner>`** — absent. In an offline-first product "the
-      tablet lost wifi" is routine, not an error.
-- [ ] **F3 — `<DataView>`** — absent. Table at T4, cards at T1–T3; one place for
-      empty / loading / error.
-- [ ] **F4 — `<AsyncBoundary>`** — absent. Every screen improvises today.
-- [ ] **F5 — `<MoneyText>` / `<MoneyInput>`** — absent. Money is integer kobo
-      (invariant 2); no component should do its own `/ 100`.
-- [ ] **F6 — `<ConfirmDestructive>`** — absent. Voids, revocations and overrides
-      need typed confirmation and a reason.
-- [ ] **F7 — `<AuditTrail>`** — absent. Night audit, folio reversals, update
-      attempts and settlement all now emit exactly this shape.
-- [ ] **F8 — `<ScanInput>`** — absent. QR / NFC for T1 and T2.
-- [ ] **F9 — `<RoleGate>`** — absent. Action-level gating matching the server's
-      permission keys, so a wired-but-unpermitted button is never shown.
-- [ ] **F10 — TanStack Query** — not installed. Adopt *before* wiring, or
-      hand-roll caching / retry / invalidation 20+ times inconsistently.
+- [x] **F1 — Adaptive tiers (T1–T4).** `lib/tier.ts`. **T1 is declared by the
+      shell, never inferred** — T1 (360–420px) and T2 (390–430px) overlap by
+      width, because T1 is a *device class* (gloved, arm-strapped) not a
+      viewport. No media query can separate them. Exposes `touchTarget`,
+      `prefersTable`, `hasHover`, `sheetSide`, `prefersScan` so components read
+      a rule rather than re-deriving `tier === "T4"`.
+- [x] **F2 — `<OfflineBanner>`** — `components/OfflineBanner.tsx`, driven by
+      `lib/connection.ts`. **Replaced a demo prop**: the old banner was fed by
+      a manually-toggled boolean (*"Click to simulate offline"*) and claimed
+      *"Changes will sync automatically when reconnected"* — untrue, there is
+      no client write queue. See the log.
+- [x] **F3 — `<DataView>`** — table at T4, cards at T1–T3, from ONE column
+      array so the two shapes cannot drift.
+- [x] **F4 — `<AsyncBoundary>`** — distinguishes unreachable / forbidden /
+      other, and suppresses retry on a 403 where retrying cannot help.
+- [x] **F5 — `<MoneyText>` / `<MoneyInput>`** — kobo in, kobo out.
+      `MoneyInput` holds raw typed text and formats only on blur, so `1250.5`
+      stays typeable.
+- [x] **F6 — `<ConfirmDestructive>`** — reason required (most destructive
+      endpoints reject an empty one server-side); typed phrase is opt-in, for
+      irreversible actions only.
+- [x] **F7 — `<AuditTrail>`** — **Doc 3 was wrong that the sources "already
+      have the shape"**: `WorkOrderEvent`/`KeyCardEvent`/`AuditLogEntry` use
+      three names for the verb, two for the timestamp, two for the note. One
+      normalised event plus an adapter per source, all in one file.
+- [x] **F8 — `<ScanInput>`** — camera and NFC are **capability-gated**:
+      `BarcodeDetector` is Chromium-only, Web NFC is Android-Chrome-only. Where
+      absent the button is not shown, never shown-and-broken. Manual entry is
+      always present and styled first-class.
+- [x] **F9 — `<RoleGate>`** — **required a backend change**: `/auth/me`
+      returned no permissions, so the client could only gate by role name.
+      Now returns `permissionsForRole()`. Fails OPEN on unknown (see the file
+      for why) — it is an affordance, never the control.
+- [x] **F10 — TanStack Query** — installed and mounted with LAN-tuned
+      defaults. **Mutations never auto-retry** — retrying a write risks
+      double-posting a charge.
 - [ ] **F11 — Navigation rebuild.** The `Screen` enum still exists alongside
       `react-router` — two sources of truth (Doc 3 §3). Delete the enum, move
       `SCREEN_ROLE_MAP` onto route definitions, filters into `useSearchParams`.
-- [ ] **F12 — `tokens.ts`** — absent. Tokens live in `data.tsx` *and*
-      `theme.css`, hand-synced.
+      **Still outstanding** — the largest single item here, touching all 80
+      screens' entry points.
+- [x] **F12 — `tokens.ts`** — authoritative; `theme.css` and `data.tsx` become
+      mirrors, and the `data.tsx` re-exports die as screens are ported.
 
 ---
 
@@ -403,14 +422,14 @@ Doc 3 §5 (quality gates). A screen is not checked off until:
 | Section | Done | Total |
 |---|---|---|
 | Prerequisites (§2) | 0 | 6 |
-| UI foundation — Phase 3 (§3) | 0 | 12 |
+| UI foundation — Phase 3 (§3) | **11** | 12 |
 | New screens, backend ready (§4) | 0 | 11 |
 | New screens, blocked (§5) | 0 | 10 |
 | Main's unwired screens (§6) | 0 | 22 (11 ready, 11 blocked) |
 | Figma batches undesigned (§7) | 0 | 3 batches / ~25 screens |
 | Non-screen assets (§8) | 0 | 6 |
 | Overlap decisions (§9) | 0 | 80 |
-| **Total** | **0 adopted** | **67 items + 80 screen decisions** |
+| **Total** | **11 done** | **67 items + 80 screen decisions** |
 
 ---
 
@@ -418,6 +437,9 @@ Doc 3 §5 (quality gates). A screen is not checked off until:
 
 | Date | Item | Note |
 |---|---|---|
+| 2026-08-16 | **§3 foundation — 11 of 12 landed** | `lib/tokens.ts`, `lib/tier.ts`, `lib/connection.ts` + 8 components. Web typecheck + build clean; server typecheck clean, 314 tests passing. Bundle 1,211 → 1,242 kB (TanStack Query + 8 components). **F11 (nav rebuild) not started.** |
+| 2026-08-16 | **Removed a demo prop from the shell** | The header sync pill toggled a local boolean and toasted *"5 pending items pushed"* when nothing had synced; the offline banner it drove promised queued changes that do not exist. Both replaced with real signals (`GET /sync/status`, and a request actually failing to reach the server). Same defect class as Phase 0.1's no-op controls, still live in `App.tsx`. |
+| 2026-08-16 | Backend: `/auth/me` now returns permissions | Two lines, reusing the existing `permissionsForRole()`. Without it `<RoleGate>` could only gate by role name, which drifts as soon as a manager edits a role via HR-03. |
 | 2026-08-16 | **Tracker rebuilt after I destroyed it** | A section-renumbering script's split regex failed and truncated the file to its header. It was untracked, so there was no git copy. Rebuilt from the scratchpad source data. **Committing this file is the fix**, and no more regex surgery on it. |
 | 2026-08-16 | Audited against all five planning docs | Added §3 (12 Phase-3 foundation items, none exist), §6 (main's 22 unwired screens — 11 wireable today), §7 (3 Figma batches undesigned) |
 | 2026-08-16 | §9 delta review COMPLETE | 73 redesigned / 5 cosmetic / 2 unchanged. **62 screens have UI in main the export lacks (289 labels)** |

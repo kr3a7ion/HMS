@@ -102,7 +102,7 @@ export function CancellationRefund({ add }: { add: (t: Omit<Toast, "id">) => voi
           <Sel label="Refund Method" options={["Original payment method", "Cash", "Bank Transfer"]} />
           <div className="mt-3"><Inp label="Refund Amount (₦)" defaultValue={refund.toLocaleString()} /></div>
           <div className="mt-3"><label className="text-xs font-medium uppercase tracking-wider block mb-1" style={{ color: MUTED }}>Notes for guest</label><textarea className="w-full px-3 py-2.5 border rounded-lg text-sm outline-none resize-none" rows={3} placeholder="Optional message to include with refund notification…" style={{ borderColor: BORDER }} /></div>
-          <div className="mt-4"><BtnP label="Process Refund" icon={DollarSign} onClick={() => add({ type: "success", title: "Refund processed", body: `₦${refund.toLocaleString()} → ${res.guest}` })} /></div>
+          <div className="mt-4"><BtnP label="Process Refund" icon={DollarSign} onClick={() => add({ type: "info", title: "Not available yet — no refund was issued", body: `Would be ₦${refund.toLocaleString()} → ${res.guest}` })} /></div>
         </div>
       </div>
     </div>
