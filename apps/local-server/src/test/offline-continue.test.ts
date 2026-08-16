@@ -6,7 +6,7 @@
 // is what "works with the internet down" actually reduces to technically.
 //
 // Run with: npm test  (from server/)
-import { test, before, after } from "node:test";
+import { test, beforeAll as before, afterAll as after } from "vitest";
 import assert from "node:assert/strict";
 import http from "node:http";
 import os from "node:os";
@@ -45,7 +45,7 @@ before(async () => {
   const now = new Date();
 
   db.insert(organizations).values({ id: orgId, name: "Test Org", createdAt: now }).run();
-  db.insert(branches).values({ id: branchId, organizationId: orgId, name: "Test Branch", createdAt: now }).run();
+  db.insert(branches).values({ id: branchId, organizationId: orgId, name: "Test Branch", createdAt: now, currentBusinessDate: new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate())) }).run();
   db.insert(users).values({
     id: userId, organizationId: orgId, branchId,
     email: "offline-test@example.com", passwordHash: await hashPassword("demo123"),

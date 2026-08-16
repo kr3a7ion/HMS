@@ -14,6 +14,7 @@ import crypto from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "../../db/client.js";
 import { doorLockConfig } from "../../db/schema.js";
+import { readDoorLockConfigWithSecrets } from "./config.js";
 import {
   type LockProvider, type ActivateCardParams, type ActivateCardResult,
   type GeneratePinParams, type GeneratePinResult, type RevokeParams,
@@ -50,7 +51,10 @@ async function fetchToken(cfg: TTLockConfigRow): Promise<{ accessToken: string; 
 }
 
 async function getValidToken(branchId: string): Promise<{ clientId: string; accessToken: string }> {
-  const cfg = db.select().from(doorLockConfig).where(eq(doorLockConfig.branchId, branchId)).get();
+  // Backend Blueprint B0.3: read through the decrypting accessor, never the
+  // raw row -- clientSecret/password are stored encrypted at rest and would
+  // otherwise be sent to TTLock as ciphertext.
+  const cfg = readDoorLockConfigWithSecrets(branchId);
   if (!cfg) throw new LockProviderError("Door lock is not configured for this branch", false);
   const now = Date.now();
   if (cfg.accessToken && cfg.tokenExpiresAt && cfg.tokenExpiresAt.getTime() - 60_000 > now) {

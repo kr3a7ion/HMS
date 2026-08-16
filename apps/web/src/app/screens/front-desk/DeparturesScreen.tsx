@@ -40,6 +40,7 @@ import {
   settingsApi, type BranchSettings, type UserPreferences, type ModuleKey,
   dashboardApi, type RoleDashboard, type ManagementOverview, type DashboardStat, type ActivityEvent,
   syncApi, type SyncStatus, type CachedBranch,
+  type DepartureRow,
 } from "../../lib/api";
 import {
   type Role, type Toast, type ToastType, type AddToast, fmtN, uid,
@@ -56,33 +57,81 @@ import {
 import {
   Badge, EmptyState, ToastC, LiveClock, SyncPill, StatCard, PageHeader, BtnP, BtnO, Inp, Sel, PlaceholderScreen,
 } from "../../Screens";
+import { AsyncBoundary } from "../../components/AsyncBoundary";
+import { MoneyText } from "../../components/Money";
 
-const DEPARTURES_DATA = [
-  { room: "101", guest: "Adaeze Okonkwo", checkout: "11:00", balance: 0, lateFlag: false, nights: 3, av: "AO" },
-  { room: "202", guest: "Emmanuel Adeyemi", checkout: "11:00", balance: 45000, lateFlag: false, nights: 2, av: "EA" },
-  { room: "203", guest: "Fatima Musa", checkout: "12:00", balance: 0, lateFlag: true, nights: 3, av: "FM" },
-  { room: "118", guest: "Tunde Lawal", checkout: "10:00", balance: 18500, lateFlag: false, nights: 1, av: "TL" },
-];
+/** Initials for the avatar chip. The mock carried a precomputed `av` field. */
+function initials(name: string | null): string {
+  if (!name) return "?";
+  return name.split(/\s+/).filter(Boolean).map(n => n[0]).join("").slice(0, 2).toUpperCase();
+}
+
+// FD-07 Departures List -- wired to GET /reservations/departures (B10).
+//
+// TWO COLUMNS COULD NOT BE FILLED FROM THE DATA AS IT STOOD.
+//
+// "Balance Due" mattered enough to fix properly: a clerk cannot check anyone
+// out without knowing what they owe, so the endpoint now returns the folio
+// balance per row (computed after pagination, so the work is bounded by page
+// size). That column is real.
+//
+// "Checkout Time" and "Late Checkout" are NOT. `reservations` stores whole
+// business dates, with no per-guest checkout time and no late-checkout flag,
+// so the mock's 11:00/12:00 and its "Late Checkout" badge had nothing behind
+// them. Both columns stay -- the design calls for them and dropping them
+// would be a silent removal -- and read "--" until the fields exist.
 
 export function DeparturesScreen({ add }: { add: (t: Omit<Toast, "id">) => void }) {
   const navigate = useNavigate();
+  const [rows, setRows] = useState<DepartureRow[]>([]);
+  const [businessDate, setBusinessDate] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<unknown>(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    reservationsApi.departures()
+      .then(page => { setRows(page.items); setBusinessDate(page.businessDate); })
+      .catch(setError)
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(load, [load]);
+
+  const dateLabel = businessDate
+    ? new Date(businessDate).toLocaleDateString("en-NG", { day: "2-digit", month: "short", year: "numeric" })
+    : "";
+
   return (
     <div>
-      <PageHeader title="Departures List" sub={`${DEPARTURES_DATA.length} expected check-outs today · 24 Jun 2025`} actions={<><BtnO label="Print List" icon={FileText} /><BtnP label="Quick Check-Out" icon={ArrowRight} /></>} />
+      <PageHeader title="Departures List"
+        sub={loading ? "Loading…" : `${rows.length} expected check-out${rows.length === 1 ? "" : "s"}${dateLabel ? ` · ${dateLabel}` : ""}`}
+        actions={<><BtnO label="Print List" icon={FileText} onClick={() => window.print()} /><BtnP label="Quick Check-Out" icon={ArrowRight} onClick={() => navigate("/front-desk/check-out")} /></>} />
       <div className="bg-white rounded-xl border overflow-hidden" style={{ borderColor: BORDER }}>
-        <table className="w-full">
-          <thead><tr style={{ backgroundColor: "#F8FAFC" }}>{["Room", "Guest", "Checkout Time", "Balance Due", "Late Checkout", ""].map(h => <th key={h} className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider" style={{ color: MUTED }}>{h}</th>)}</tr></thead>
-          <tbody>{DEPARTURES_DATA.map(d => (
-            <tr key={d.room} className="border-t hover:bg-[#FAFBFD] transition-colors" style={{ borderColor: "#F1F5F9" }}>
-              <td className="px-5 py-3 font-bold text-lg" style={{ color: PRIMARY }}>{d.room}</td>
-              <td className="px-5 py-3"><div className="flex items-center gap-2.5"><div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0" style={{ backgroundColor: PRIMARY }}>{d.av}</div><span className="text-sm font-medium" style={{ color: TEXT }}>{d.guest}</span></div></td>
-              <td className="px-5 py-3 text-sm font-mono" style={{ color: TEXT, fontFamily: mono }}>{d.checkout}</td>
-              <td className="px-5 py-3">{d.balance > 0 ? <span className="text-sm font-bold" style={{ color: ERROR }}>₦{d.balance.toLocaleString()}</span> : <span className="flex items-center gap-1 text-xs" style={{ color: SUCCESS }}><CheckCircle2 size={13} />Settled</span>}</td>
-              <td className="px-5 py-3">{d.lateFlag ? <Badge label="Late Checkout" colors={{ bg: "#FEF3C7", text: "#92400E" }} /> : <span style={{ color: SUBTLE }}>—</span>}</td>
-              <td className="px-5 py-3"><div className="flex gap-1"><button onClick={() => navigate("/front-desk/check-out")} className="text-xs px-2.5 py-1.5 rounded-lg border font-medium" style={{ color: TEAL, borderColor: `${TEAL}30` }}>Check Out</button><button className="text-xs px-2.5 py-1.5 rounded-lg border" style={{ color: MUTED, borderColor: BORDER }}>Extend</button></div></td>
-            </tr>
-          ))}</tbody>
-        </table>
+        <div className="p-1">
+          <AsyncBoundary loading={loading} error={error} onRetry={load} skeletonRows={5}>
+            {rows.length === 0 ? (
+              <EmptyState icon={ArrowRight} message="No departures for today." />
+            ) : (
+              <table className="w-full">
+                <thead><tr style={{ backgroundColor: "#F8FAFC" }}>{["Room", "Guest", "Checkout Time", "Balance Due", "Late Checkout", ""].map(h => <th key={h} className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider" style={{ color: MUTED }}>{h}</th>)}</tr></thead>
+                <tbody>{rows.map(d => (
+                  <tr key={d.id} className="border-t hover:bg-[#FAFBFD] transition-colors" style={{ borderColor: "#F1F5F9" }}>
+                    <td className="px-5 py-3 font-bold text-lg" style={{ color: PRIMARY }}>{d.roomNumber ?? "—"}</td>
+                    <td className="px-5 py-3"><div className="flex items-center gap-2.5"><div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0" style={{ backgroundColor: PRIMARY }}>{initials(d.guestName)}</div><span className="text-sm font-medium" style={{ color: TEXT }}>{d.guestName ?? "—"}</span></div></td>
+                    {/* No per-guest checkout time is recorded -- see the note above. */}
+                    <td className="px-5 py-3 text-sm" style={{ color: SUBTLE, fontFamily: mono }} title="Checkout time isn't recorded yet">—</td>
+                    <td className="px-5 py-3">{d.balanceKobo > 0 ? <MoneyText kobo={d.balanceKobo} className="text-sm font-bold" /> : <span className="flex items-center gap-1 text-xs" style={{ color: SUCCESS }}><CheckCircle2 size={13} />Settled</span>}</td>
+                    {/* No late-checkout flag exists -- see the note above. */}
+                    <td className="px-5 py-3"><span style={{ color: SUBTLE }} title="Late checkout isn't tracked yet">—</span></td>
+                    <td className="px-5 py-3"><div className="flex gap-1"><button onClick={() => navigate(`/front-desk/check-out/${d.id}`)} className="text-xs px-2.5 py-1.5 rounded-lg border font-medium" style={{ color: TEAL, borderColor: `${TEAL}30` }}>Check Out</button><button onClick={() => navigate(`/reservations/${d.id}`)} className="text-xs px-2.5 py-1.5 rounded-lg border" style={{ color: MUTED, borderColor: BORDER }}>Open</button></div></td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            )}
+          </AsyncBoundary>
+        </div>
       </div>
     </div>
   );

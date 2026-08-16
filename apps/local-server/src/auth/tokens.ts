@@ -3,7 +3,7 @@
 // pair from auth/keys.ts -- no network call, ever (Part 6.2).
 import jwt from "jsonwebtoken";
 import crypto from "node:crypto";
-import { localSigningKeys } from "./keys.js";
+import { localSigningKeys, previousVerificationKey } from "./keys.js";
 
 export const ACCESS_TOKEN_TTL_SECONDS = 12 * 60 * 60; // 12h default, Part 6.1
 export const GRACE_EXTENSION_TTL_SECONDS = 4 * 60 * 60; // Part 7.1
@@ -32,13 +32,32 @@ export function signGraceExtensionToken(payload: AccessTokenPayload): string {
 
 type VerifiedPayload = AccessTokenPayload & jwt.JwtPayload;
 
+/**
+ * Tries the current key, then the previous one if it is still inside its
+ * rotation overlap window (B17.5).
+ *
+ * WITHOUT THE FALLBACK, rotating the signing key logs every member of staff
+ * out at the same instant -- every token in every browser was signed by the
+ * key that just went away. In a hotel that means the whole shift, possibly
+ * mid-check-in. The overlap lets tokens age out naturally instead.
+ */
+function verifyWithRotation(token: string, options: jwt.VerifyOptions): VerifiedPayload | null {
+  try {
+    return jwt.verify(token, localSigningKeys.publicKey, options) as VerifiedPayload;
+  } catch {
+    const previous = previousVerificationKey();
+    if (!previous) return null;
+    try {
+      return jwt.verify(token, previous, options) as VerifiedPayload;
+    } catch {
+      return null;
+    }
+  }
+}
+
 /** Normal request path — rejects if signature invalid OR token expired. */
 export function verifyAccessToken(token: string): VerifiedPayload | null {
-  try {
-    return jwt.verify(token, localSigningKeys.publicKey, { algorithms: ["RS256"] }) as VerifiedPayload;
-  } catch {
-    return null;
-  }
+  return verifyWithRotation(token, { algorithms: ["RS256"] });
 }
 
 /**
@@ -48,14 +67,7 @@ export function verifyAccessToken(token: string): VerifiedPayload | null {
  * use this for anything other than the continue-offline endpoint.
  */
 export function decodeIgnoringExpiry(token: string): VerifiedPayload | null {
-  try {
-    return jwt.verify(token, localSigningKeys.publicKey, {
-      algorithms: ["RS256"],
-      ignoreExpiration: true,
-    }) as VerifiedPayload;
-  } catch {
-    return null;
-  }
+  return verifyWithRotation(token, { algorithms: ["RS256"], ignoreExpiration: true });
 }
 
 export function generateRefreshToken(): string {

@@ -19,6 +19,7 @@ import { db } from "../db/client.js";
 import { guestMessageThreads, guestMessages, guests, reservations, rooms, users, chatChannels, chatMessages } from "../db/schema.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../auth/middleware.js";
 import { logAudit } from "../services/audit.js";
+import { transaction } from "../db/tx.js";
 import { getOrCreateDmChannel } from "./chat.js";
 
 const router = Router();
@@ -113,14 +114,18 @@ router.post("/threads/:guestId/messages", requireAuth, requirePermission("guests
   const parsed = logMessageSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "INVALID_INPUT", details: parsed.error.flatten() });
 
-  const thread = loadOrCreateThread(guest.id, req.auth!.branchId);
   const id = nanoid();
   const now = new Date();
-  db.insert(guestMessages).values({
-    id, threadId: thread.id, channel: parsed.data.channel, direction: parsed.data.direction,
-    body: parsed.data.body, loggedBy: req.auth!.userId, createdAt: now,
-  }).run();
-  db.update(guestMessageThreads).set({ lastMessageAt: now }).where(eq(guestMessageThreads.id, thread.id)).run();
+  // Message + thread timestamp together: a thread whose lastMessageAt does
+  // not reflect its newest message sorts wrong in the inbox forever.
+  transaction(() => {
+    const thread = loadOrCreateThread(guest.id, req.auth!.branchId);
+    db.insert(guestMessages).values({
+      id, threadId: thread.id, channel: parsed.data.channel, direction: parsed.data.direction,
+      body: parsed.data.body, loggedBy: req.auth!.userId, createdAt: now,
+    }).run();
+    db.update(guestMessageThreads).set({ lastMessageAt: now }).where(eq(guestMessageThreads.id, thread.id)).run();
+  });
 
   res.status(201).json({ id });
 });
@@ -137,24 +142,29 @@ router.post("/threads/:guestId/forward", requireAuth, requirePermission("guests:
   const parsed = forwardSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "INVALID_INPUT" });
 
-  const thread = loadOrCreateThread(guest.id, req.auth!.branchId);
   const branchId = req.auth!.branchId;
-  let deptChannel = db.select().from(chatChannels).where(and(eq(chatChannels.branchId, branchId), eq(chatChannels.type, "department"), eq(chatChannels.name, parsed.data.department))).get();
-  if (!deptChannel) {
-    const channelId = nanoid();
-    db.insert(chatChannels).values({ id: channelId, branchId, type: "department", name: parsed.data.department, createdAt: new Date() }).run();
-    deptChannel = db.select().from(chatChannels).where(eq(chatChannels.id, channelId)).get()!;
-  }
+  // Marking the thread forwarded and actually posting into the department
+  // channel must not come apart -- a thread that says "forwarded" with no
+  // message in the channel is a request nobody will ever see.
+  transaction(() => {
+    const thread = loadOrCreateThread(guest.id, req.auth!.branchId);
+    let deptChannel = db.select().from(chatChannels).where(and(eq(chatChannels.branchId, branchId), eq(chatChannels.type, "department"), eq(chatChannels.name, parsed.data.department))).get();
+    if (!deptChannel) {
+      const channelId = nanoid();
+      db.insert(chatChannels).values({ id: channelId, branchId, type: "department", name: parsed.data.department, createdAt: new Date() }).run();
+      deptChannel = db.select().from(chatChannels).where(eq(chatChannels.id, channelId)).get()!;
+    }
 
-  const roomNumber = currentRoomForGuest(guest.id, branchId);
-  db.insert(chatMessages).values({
-    id: nanoid(), channelId: deptChannel.id, senderId: req.auth!.userId,
-    body: `Guest message forwarded — ${guest.firstName} ${guest.lastName}${roomNumber ? ` (Room ${roomNumber})` : ""}: see Guest Messaging for the full thread.`,
-    emergency: false, createdAt: new Date(),
-  }).run();
+    const roomNumber = currentRoomForGuest(guest.id, branchId);
+    db.insert(chatMessages).values({
+      id: nanoid(), channelId: deptChannel.id, senderId: req.auth!.userId,
+      body: `Guest message forwarded — ${guest.firstName} ${guest.lastName}${roomNumber ? ` (Room ${roomNumber})` : ""}: see Guest Messaging for the full thread.`,
+      emergency: false, createdAt: new Date(),
+    }).run();
 
-  db.update(guestMessageThreads).set({ status: "forwarded", forwardedToDepartment: parsed.data.department }).where(eq(guestMessageThreads.id, thread.id)).run();
-  logAudit({ userId: req.auth!.userId, branchId, action: "guest_thread_forwarded", module: "Communications", recordId: thread.id, details: `${guest.firstName} ${guest.lastName} -> ${parsed.data.department}`, ipAddress: req.ip });
+    db.update(guestMessageThreads).set({ status: "forwarded", forwardedToDepartment: parsed.data.department }).where(eq(guestMessageThreads.id, thread.id)).run();
+    logAudit({ userId: req.auth!.userId, branchId, action: "guest_thread_forwarded", module: "Communications", recordId: thread.id, details: `${guest.firstName} ${guest.lastName} -> ${parsed.data.department}`, ipAddress: req.ip });
+  });
   res.json({ ok: true });
 });
 
@@ -164,19 +174,24 @@ router.post("/threads/:guestId/escalate", requireAuth, requirePermission("guests
   const guest = db.select().from(guests).where(and(eq(guests.id, req.params.guestId), eq(guests.branchId, req.auth!.branchId))).get();
   if (!guest) return res.status(404).json({ error: "GUEST_NOT_FOUND" });
 
-  const thread = loadOrCreateThread(guest.id, req.auth!.branchId);
   const branchId = req.auth!.branchId;
   const managerUsers = db.select().from(users).where(eq(users.branchId, branchId)).all().filter(u => (u.role === "MGT" || u.role === "ORG") && u.status === "active" && u.id !== req.auth!.userId);
 
-  const roomNumber = currentRoomForGuest(guest.id, branchId);
-  const summary = `🔺 Guest thread escalated — ${guest.firstName} ${guest.lastName}${roomNumber ? ` (Room ${roomNumber})` : ""}: see Guest Messaging for the full thread.`;
-  for (const mgr of managerUsers) {
-    const { id: channelId } = getOrCreateDmChannel(branchId, req.auth!.userId, mgr.id);
-    db.insert(chatMessages).values({ id: nanoid(), channelId, senderId: req.auth!.userId, body: summary, emergency: false, createdAt: new Date() }).run();
-  }
+  // Either every manager is notified and the thread is marked escalated, or
+  // none of it happened. Notifying three of five managers and recording
+  // "escalated" is the worst outcome: it looks handled and isn't.
+  transaction(() => {
+    const thread = loadOrCreateThread(guest.id, req.auth!.branchId);
+    const roomNumber = currentRoomForGuest(guest.id, branchId);
+    const summary = `🔺 Guest thread escalated — ${guest.firstName} ${guest.lastName}${roomNumber ? ` (Room ${roomNumber})` : ""}: see Guest Messaging for the full thread.`;
+    for (const mgr of managerUsers) {
+      const { id: channelId } = getOrCreateDmChannel(branchId, req.auth!.userId, mgr.id);
+      db.insert(chatMessages).values({ id: nanoid(), channelId, senderId: req.auth!.userId, body: summary, emergency: false, createdAt: new Date() }).run();
+    }
 
-  db.update(guestMessageThreads).set({ status: "escalated", escalatedAt: new Date() }).where(eq(guestMessageThreads.id, thread.id)).run();
-  logAudit({ userId: req.auth!.userId, branchId, action: "guest_thread_escalated", module: "Communications", recordId: thread.id, details: `${guest.firstName} ${guest.lastName} -> ${managerUsers.length} manager(s)`, ipAddress: req.ip });
+    db.update(guestMessageThreads).set({ status: "escalated", escalatedAt: new Date() }).where(eq(guestMessageThreads.id, thread.id)).run();
+    logAudit({ userId: req.auth!.userId, branchId, action: "guest_thread_escalated", module: "Communications", recordId: thread.id, details: `${guest.firstName} ${guest.lastName} -> ${managerUsers.length} manager(s)`, ipAddress: req.ip });
+  });
   res.json({ ok: true, notifiedManagers: managerUsers.length });
 });
 

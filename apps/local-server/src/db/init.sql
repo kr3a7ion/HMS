@@ -1,9 +1,15 @@
--- Bootstrap schema, run on every server boot via CREATE TABLE IF NOT EXISTS.
--- This stands in for proper Drizzle migrations while the schema is still
--- moving fast (Phase 1). Once the Front Desk slice stabilizes, switch to
--- `drizzle-kit generate` + versioned migrations instead of editing this file
--- directly -- see ROADMAP.md Phase 2.
--- Keep in sync with schema.ts by hand until that switch happens.
+-- HISTORICAL ONLY -- THIS FILE NO LONGER RUNS.
+--
+-- Superseded by the migration system (Backend Blueprint B1). Its content was
+-- frozen verbatim as src/db/migrations/0001_baseline.sql, which is what
+-- actually creates the schema now. db/client.ts no longer reads this file,
+-- and the `columnDefaults` self-healer that used to patch missing columns on
+-- every boot has been deleted along with it.
+--
+-- Kept in the tree as the provenance of 0001 and nothing else. DO NOT EDIT
+-- IT EXPECTING AN EFFECT: schema changes go in a new numbered migration
+-- under src/db/migrations/. Editing 0001_baseline.sql itself is worse --
+-- its checksum is verified on every boot and a mismatch refuses to start.
 
 CREATE TABLE IF NOT EXISTS organizations (
   id TEXT PRIMARY KEY,

@@ -3,6 +3,8 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import path from "node:path";
 import fs from "node:fs";
 import * as schema from "./schema.js";
+import { logger } from "../lib/logger.js";
+import { runMigrations } from "./migrate.js";
 import { SYSTEM_ROLE_SEED } from "../auth/permissionKeys.js";
 
 const dataDir = path.resolve(process.cwd(), "data");
@@ -27,9 +29,9 @@ if (fs.existsSync(pendingRestoreMarker)) {
     }
     fs.copyFileSync(snapshotPath, dbPath);
     restoredFileName = path.basename(snapshotPath);
-    console.log(`[db] Restored from snapshot: ${snapshotPath}`);
+    logger.info(`[db] Restored from snapshot: ${snapshotPath}`);
   } else {
-    console.error(`[db] Pending restore marker points at a missing snapshot: ${snapshotPath} -- skipping restore.`);
+    logger.error(`[db] Pending restore marker points at a missing snapshot: ${snapshotPath} -- skipping restore.`);
   }
   fs.unlinkSync(pendingRestoreMarker);
 }
@@ -38,75 +40,34 @@ const sqlite = new Database(dbPath);
 sqlite.pragma("journal_mode = WAL");
 sqlite.pragma("foreign_keys = ON");
 
-// Bootstrap schema on boot. See init.sql for why this isn't a Drizzle
-// migration yet. Resolved from cwd (not __dirname) so this works both under
-// `tsx watch src/index.ts` and the compiled `node dist/index.js` -- always
-// run this server with `server/` as the working directory.
-const initSql = fs.readFileSync(path.resolve(process.cwd(), "src/db/init.sql"), "utf8");
-sqlite.exec(initSql);
-
-// `CREATE TABLE IF NOT EXISTS` above is a no-op against a database that
-// already has the table from an earlier boot -- it won't add columns a
-// later schema change introduced. Self-heal by diffing each table's actual
-// columns against what init.sql now expects and ALTER-ing in whatever's
-// missing, with a sane default so existing rows stay valid. Same caveat as
-// the rest of init.sql: fine while the schema is still moving, replace with
-// real migrations once it stabilizes.
-const columnDefaults: Record<string, Record<string, string>> = {
-  rooms: {
-    housekeeping_status: "TEXT NOT NULL DEFAULT 'clean'",
-    assigned_attendant_id: "TEXT REFERENCES users(id)",
-    priority: "INTEGER NOT NULL DEFAULT 0",
-    dnd: "INTEGER NOT NULL DEFAULT 0",
-  },
-  reservations: {
-    disputed: "INTEGER NOT NULL DEFAULT 0",
-  },
-  users: {
-    employee_id: "TEXT",
-    department: "TEXT",
-    phone: "TEXT",
-    emergency_contact_name: "TEXT",
-    emergency_contact_phone: "TEXT",
-    start_date: "INTEGER",
-    pay_rate: "REAL",
-    contract_type: "TEXT",
-  },
-  guests: {
-    nationality: "TEXT",
-  },
-  branches: {
-    address: "TEXT",
-    contact_phone: "TEXT",
-    contact_email: "TEXT",
-    check_in_time: "TEXT NOT NULL DEFAULT '14:00'",
-    check_out_time: "TEXT NOT NULL DEFAULT '11:00'",
-    currency: "TEXT NOT NULL DEFAULT 'NGN'",
-    timezone: "TEXT NOT NULL DEFAULT 'Africa/Lagos'",
-    tax_name: "TEXT NOT NULL DEFAULT 'VAT'",
-    tax_rate: "REAL NOT NULL DEFAULT 7.5",
-    tax_inclusive: "INTEGER NOT NULL DEFAULT 0",
-    rate_rounding: "INTEGER NOT NULL DEFAULT 0",
-    discount_approval_threshold: "REAL NOT NULL DEFAULT 0",
-    enabled_modules_json: "TEXT NOT NULL DEFAULT '[\"restaurant\",\"inventory\",\"multiBranch\",\"doorLock\"]'",
-  },
-  sync_state: {
-    update_channel: "TEXT",
-    force_update_requested: "INTEGER NOT NULL DEFAULT 0",
-    rollback_to_version: "TEXT",
-    last_update_check_at: "INTEGER",
-    last_update_status: "TEXT",
-    last_update_error: "TEXT",
-  },
-};
-for (const [table, columns] of Object.entries(columnDefaults)) {
-  const existing = new Set(sqlite.prepare(`PRAGMA table_info(${table})`).all().map((c: any) => c.name));
-  for (const [column, definition] of Object.entries(columns)) {
-    if (!existing.has(column)) {
-      sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
-      console.log(`[db] Migrated: added ${table}.${column}`);
-    }
+// Backend Blueprint B1. Schema is now owned entirely by versioned
+// migrations in src/db/migrations (see migrate.ts). init.sql no longer runs
+// at boot -- it survives only as the frozen source of 0001_baseline.sql --
+// and the old `columnDefaults` / PRAGMA table_info self-healer is gone: a
+// database that silently repairs its own shape on boot can never be
+// reasoned about, because no two properties are guaranteed to agree.
+//
+// This runs before drizzle opens over the connection, and after the restore
+// marker above, so a staged restore is applied first and then migrated
+// forward.
+//
+// A failure here is fatal by design. The alternative -- starting anyway --
+// means serving a hotel from a database whose shape the code disagrees
+// with, which is how you get silently wrong folio balances rather than an
+// outage someone notices.
+export let schemaVersion = 0;
+try {
+  const outcome = runMigrations(sqlite, dbPath);
+  schemaVersion = outcome.currentVersion;
+  if (outcome.appliedNow.length > 0) {
+    logger.info({ applied: outcome.appliedNow, schemaVersion }, "[db] Migrations applied");
   }
+} catch (err) {
+  logger.fatal({ err }, "[db] FATAL: database migration failed -- refusing to start");
+  // Also to stderr: if the failure is in the logger's own transport, or an
+  // operator is reading raw container output, the pino line may not surface.
+  console.error(`\n[db] FATAL: ${err instanceof Error ? err.message : String(err)}\n`);
+  process.exit(1);
 }
 
 // HR-03 Roles & Permissions. Bootstraps the 12 built-in roles (Blueprint
@@ -120,7 +81,7 @@ const insertRole = sqlite.prepare(`INSERT INTO roles (id, name, is_system_role, 
 for (const [code, seed] of Object.entries(SYSTEM_ROLE_SEED)) {
   if (existingRoleIds.has(code)) continue;
   insertRole.run(code, seed.name, JSON.stringify(seed.permissions), Date.now());
-  console.log(`[db] Bootstrapped role: ${code} (${seed.name})`);
+  logger.info(`[db] Bootstrapped role: ${code} (${seed.name})`);
 }
 
 export const db = drizzle(sqlite, { schema });

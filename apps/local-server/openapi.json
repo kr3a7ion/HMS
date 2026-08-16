@@ -667,6 +667,42 @@
         }
       }
     },
+    "/admin/users/{id}/unlock": {
+      "post": {
+        "operationId": "postAdminUsersByIdUnlock",
+        "tags": [
+          "IT Admin"
+        ],
+        "summary": "POST /admin/users/:id/unlock",
+        "description": "**Requires permission:** `admin:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
     "/announcements": {
       "get": {
         "operationId": "getAnnouncements",
@@ -963,6 +999,58 @@
         }
       }
     },
+    "/availability": {
+      "get": {
+        "operationId": "getAvailability",
+        "tags": [
+          "availability"
+        ],
+        "summary": "GET /availability",
+        "description": "**Requires permission:** `rates:read` or `inventory:calendar` or `reservations:create`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/availability/quote": {
+      "post": {
+        "operationId": "postAvailabilityQuote",
+        "tags": [
+          "availability"
+        ],
+        "summary": "POST /availability/quote",
+        "description": "**Requires permission:** `rates:read` or `reservations:create`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
     "/chat/channels": {
       "get": {
         "operationId": "getChatChannels",
@@ -1141,7 +1229,7 @@
           "Dashboard"
         ],
         "summary": "Management overview dashboard (D-02)",
-        "description": "**Requires authentication** (any role).",
+        "description": "**Requires permission:** `reports:revenue` or `finance:read`",
         "security": [
           {
             "cookieAuth": []
@@ -1153,6 +1241,131 @@
           },
           "401": {
             "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/deposits": {
+      "get": {
+        "operationId": "getDeposits",
+        "tags": [
+          "deposits"
+        ],
+        "summary": "GET /deposits",
+        "description": "**Requires permission:** `deposits:manage` or `finance:read`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postDeposits",
+        "tags": [
+          "deposits"
+        ],
+        "summary": "POST /deposits",
+        "description": "**Requires permission:** `deposits:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/deposits/{id}/apply": {
+      "post": {
+        "operationId": "postDepositsByIdApply",
+        "tags": [
+          "deposits"
+        ],
+        "summary": "POST /deposits/:id/apply",
+        "description": "**Requires permission:** `deposits:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/deposits/{id}/release": {
+      "post": {
+        "operationId": "postDepositsByIdRelease",
+        "tags": [
+          "deposits"
+        ],
+        "summary": "POST /deposits/:id/release",
+        "description": "**Requires permission:** `deposits:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
           }
         }
       }
@@ -1808,6 +2021,130 @@
         }
       }
     },
+    "/folios/{id}": {
+      "get": {
+        "operationId": "getFoliosById",
+        "tags": [
+          "folios"
+        ],
+        "summary": "GET /folios/:id",
+        "description": "**Requires permission:** `folio:read`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/folios/{id}/charges/{chargeId}/void": {
+      "post": {
+        "operationId": "postFoliosByIdChargesByChargeIdVoid",
+        "tags": [
+          "folios"
+        ],
+        "summary": "POST /folios/:id/charges/:chargeId/void",
+        "description": "**Requires permission:** `folio:void`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "chargeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/folios/{id}/payments/{paymentId}/void": {
+      "post": {
+        "operationId": "postFoliosByIdPaymentsByPaymentIdVoid",
+        "tags": [
+          "folios"
+        ],
+        "summary": "POST /folios/:id/payments/:paymentId/void",
+        "description": "**Requires permission:** `folio:void`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "paymentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
     "/guest-messages/in-house": {
       "get": {
         "operationId": "getGuestMessagesInHouse",
@@ -2174,6 +2511,39 @@
           },
           "403": {
             "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/guests/{id}": {
+      "get": {
+        "operationId": "getGuestsById",
+        "tags": [
+          "Guests"
+        ],
+        "summary": "GET /guests/:id",
+        "description": "**Requires authentication** (any role).",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
           }
         }
       }
@@ -3384,6 +3754,56 @@
         }
       }
     },
+    "/inventory-calendar": {
+      "get": {
+        "operationId": "getInventoryCalendar",
+        "tags": [
+          "inventoryCalendar"
+        ],
+        "summary": "GET /inventory-calendar",
+        "description": "**Requires permission:** `inventory:calendar` or `rates:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "patchInventoryCalendar",
+        "tags": [
+          "inventoryCalendar"
+        ],
+        "summary": "PATCH /inventory-calendar",
+        "description": "**Requires permission:** `rates:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
     "/inventory/dashboard": {
       "get": {
         "operationId": "getInventoryDashboard",
@@ -3956,6 +4376,200 @@
         }
       }
     },
+    "/invoices": {
+      "get": {
+        "operationId": "getInvoices",
+        "tags": [
+          "invoices"
+        ],
+        "summary": "GET /invoices",
+        "description": "**Requires permission:** `folio:read` or `finance:read`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postInvoices",
+        "tags": [
+          "invoices"
+        ],
+        "summary": "POST /invoices",
+        "description": "**Requires permission:** `invoices:issue`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/invoices/{id}": {
+      "get": {
+        "operationId": "getInvoicesById",
+        "tags": [
+          "invoices"
+        ],
+        "summary": "GET /invoices/:id",
+        "description": "**Requires permission:** `folio:read` or `finance:read`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/invoices/{id}/credit-note": {
+      "post": {
+        "operationId": "postInvoicesByIdCreditNote",
+        "tags": [
+          "invoices"
+        ],
+        "summary": "POST /invoices/:id/credit-note",
+        "description": "**Requires permission:** `invoices:credit_note`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/invoices/{id}/payments": {
+      "post": {
+        "operationId": "postInvoicesByIdPayments",
+        "tags": [
+          "invoices"
+        ],
+        "summary": "POST /invoices/:id/payments",
+        "description": "**Requires permission:** `folio:postcharge` or `finance:read`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/invoices/{id}/void": {
+      "post": {
+        "operationId": "postInvoicesByIdVoid",
+        "tags": [
+          "invoices"
+        ],
+        "summary": "POST /invoices/:id/void",
+        "description": "**Requires permission:** `invoices:void`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
     "/lost-found": {
       "get": {
         "operationId": "getLostFound",
@@ -4405,6 +5019,799 @@
         }
       }
     },
+    "/night-audit/daily-revenue": {
+      "get": {
+        "operationId": "getNightAuditDailyRevenue",
+        "tags": [
+          "nightAudit"
+        ],
+        "summary": "GET /night-audit/daily-revenue",
+        "description": "**Requires permission:** `finance:read`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/night-audit/preflight": {
+      "post": {
+        "operationId": "postNightAuditPreflight",
+        "tags": [
+          "nightAudit"
+        ],
+        "summary": "POST /night-audit/preflight",
+        "description": "**Requires permission:** `finance:read`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/night-audit/reopen": {
+      "post": {
+        "operationId": "postNightAuditReopen",
+        "tags": [
+          "nightAudit"
+        ],
+        "summary": "POST /night-audit/reopen",
+        "description": "**Requires permission:** `finance:reopen_day`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/night-audit/run": {
+      "post": {
+        "operationId": "postNightAuditRun",
+        "tags": [
+          "nightAudit"
+        ],
+        "summary": "POST /night-audit/run",
+        "description": "**Requires permission:** `finance:read`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/night-audit/runs": {
+      "get": {
+        "operationId": "getNightAuditRuns",
+        "tags": [
+          "nightAudit"
+        ],
+        "summary": "GET /night-audit/runs",
+        "description": "**Requires permission:** `finance:read`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/night-audit/runs/{id}": {
+      "get": {
+        "operationId": "getNightAuditRunsById",
+        "tags": [
+          "nightAudit"
+        ],
+        "summary": "GET /night-audit/runs/:id",
+        "description": "**Requires permission:** `finance:read`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/night-audit/status": {
+      "get": {
+        "operationId": "getNightAuditStatus",
+        "tags": [
+          "nightAudit"
+        ],
+        "summary": "GET /night-audit/status",
+        "description": "**Requires permission:** `finance:read`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/payment-webhooks/{provider}": {
+      "post": {
+        "operationId": "postPaymentWebhooksByProvider",
+        "tags": [
+          "paymentWebhooks"
+        ],
+        "summary": "POST /payment-webhooks/:provider",
+        "description": "**No authentication required.**",
+        "security": [],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        }
+      }
+    },
+    "/payments/{id}/verify": {
+      "post": {
+        "operationId": "postPaymentsByIdVerify",
+        "tags": [
+          "payments"
+        ],
+        "summary": "POST /payments/:id/verify",
+        "description": "**Requires permission:** `payments:take`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/payments/gateways": {
+      "get": {
+        "operationId": "getPaymentsGateways",
+        "tags": [
+          "payments"
+        ],
+        "summary": "GET /payments/gateways",
+        "description": "**Requires permission:** `settings:gateways`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postPaymentsGateways",
+        "tags": [
+          "payments"
+        ],
+        "summary": "POST /payments/gateways",
+        "description": "**Requires permission:** `settings:gateways`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/payments/initiate": {
+      "post": {
+        "operationId": "postPaymentsInitiate",
+        "tags": [
+          "payments"
+        ],
+        "summary": "POST /payments/initiate",
+        "description": "**Requires permission:** `payments:take`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/payments/pending-verification": {
+      "get": {
+        "operationId": "getPaymentsPendingVerification",
+        "tags": [
+          "payments"
+        ],
+        "summary": "GET /payments/pending-verification",
+        "description": "**Requires permission:** `payments:take` or `finance:read`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/payments/terminal/push": {
+      "post": {
+        "operationId": "postPaymentsTerminalPush",
+        "tags": [
+          "payments"
+        ],
+        "summary": "POST /payments/terminal/push",
+        "description": "**Requires permission:** `payments:take`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/payments/transactions": {
+      "get": {
+        "operationId": "getPaymentsTransactions",
+        "tags": [
+          "payments"
+        ],
+        "summary": "GET /payments/transactions",
+        "description": "**Requires permission:** `payments:take` or `finance:read`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/rate-calendar": {
+      "get": {
+        "operationId": "getRateCalendar",
+        "tags": [
+          "rateCalendar"
+        ],
+        "summary": "GET /rate-calendar",
+        "description": "**Requires permission:** `rates:read` or `rates:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/rate-calendar/bulk": {
+      "post": {
+        "operationId": "postRateCalendarBulk",
+        "tags": [
+          "rateCalendar"
+        ],
+        "summary": "POST /rate-calendar/bulk",
+        "description": "**Requires permission:** `rates:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/rate-plans": {
+      "get": {
+        "operationId": "getRatePlans",
+        "tags": [
+          "ratePlans"
+        ],
+        "summary": "GET /rate-plans",
+        "description": "**Requires permission:** `rates:read` or `rates:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postRatePlans",
+        "tags": [
+          "ratePlans"
+        ],
+        "summary": "POST /rate-plans",
+        "description": "**Requires permission:** `rates:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/rate-plans/{id}": {
+      "patch": {
+        "operationId": "patchRatePlansById",
+        "tags": [
+          "ratePlans"
+        ],
+        "summary": "PATCH /rate-plans/:id",
+        "description": "**Requires permission:** `rates:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/receipts": {
+      "get": {
+        "operationId": "getReceipts",
+        "tags": [
+          "receipts"
+        ],
+        "summary": "GET /receipts",
+        "description": "**Requires permission:** `folio:read` or `finance:read`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postReceipts",
+        "tags": [
+          "receipts"
+        ],
+        "summary": "POST /receipts",
+        "description": "**Requires permission:** `invoices:issue`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/receipts/{id}": {
+      "get": {
+        "operationId": "getReceiptsById",
+        "tags": [
+          "receipts"
+        ],
+        "summary": "GET /receipts/:id",
+        "description": "**Requires permission:** `folio:read` or `finance:read`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/refunds": {
+      "get": {
+        "operationId": "getRefunds",
+        "tags": [
+          "refunds"
+        ],
+        "summary": "GET /refunds",
+        "description": "**Requires permission:** `finance:read` or `finance:refund_request`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postRefunds",
+        "tags": [
+          "refunds"
+        ],
+        "summary": "POST /refunds",
+        "description": "**Requires permission:** `finance:refund_request`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/refunds/{id}": {
+      "get": {
+        "operationId": "getRefundsById",
+        "tags": [
+          "refunds"
+        ],
+        "summary": "GET /refunds/:id",
+        "description": "**Requires permission:** `finance:read` or `finance:refund_request`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/refunds/{id}/approve": {
+      "post": {
+        "operationId": "postRefundsByIdApprove",
+        "tags": [
+          "refunds"
+        ],
+        "summary": "POST /refunds/:id/approve",
+        "description": "**Requires permission:** `finance:refund_approve`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/refunds/{id}/reject": {
+      "post": {
+        "operationId": "postRefundsByIdReject",
+        "tags": [
+          "refunds"
+        ],
+        "summary": "POST /refunds/:id/reject",
+        "description": "**Requires permission:** `finance:refund_approve`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
     "/reports/department": {
       "get": {
         "operationId": "getReportsDepartment",
@@ -4514,6 +5921,32 @@
         ],
         "summary": "Revenue Report (RP-02)",
         "description": "**Requires permission:** `reports:revenue`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/reports/reversals": {
+      "get": {
+        "operationId": "getReportsReversals",
+        "tags": [
+          "Reports"
+        ],
+        "summary": "GET /reports/reversals",
+        "description": "**Requires permission:** `finance:reports`",
         "security": [
           {
             "cookieAuth": []
@@ -4701,6 +6134,148 @@
             "description": "Missing or invalid session"
           }
         }
+      },
+      "patch": {
+        "operationId": "patchReservationsById",
+        "tags": [
+          "Reservations"
+        ],
+        "summary": "PATCH /reservations/:id",
+        "description": "**Requires permission:** `reservations:create`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/reservations/{id}/assign-room": {
+      "post": {
+        "operationId": "postReservationsByIdAssignRoom",
+        "tags": [
+          "Reservations"
+        ],
+        "summary": "POST /reservations/:id/assign-room",
+        "description": "**Requires permission:** `reservations:checkinout`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/reservations/{id}/cancel": {
+      "post": {
+        "operationId": "postReservationsByIdCancel",
+        "tags": [
+          "Reservations"
+        ],
+        "summary": "POST /reservations/:id/cancel",
+        "description": "**Requires permission:** `reservations:cancel`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/reservations/{id}/cancellation-preview": {
+      "get": {
+        "operationId": "getReservationsByIdCancellationPreview",
+        "tags": [
+          "Reservations"
+        ],
+        "summary": "GET /reservations/:id/cancellation-preview",
+        "description": "**Requires permission:** `reservations:cancel`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
       }
     },
     "/reservations/{id}/check-in": {
@@ -4814,6 +6389,42 @@
         }
       }
     },
+    "/reservations/{id}/extend": {
+      "post": {
+        "operationId": "postReservationsByIdExtend",
+        "tags": [
+          "Reservations"
+        ],
+        "summary": "POST /reservations/:id/extend",
+        "description": "**Requires permission:** `reservations:checkinout`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
     "/reservations/{id}/folio/charges": {
       "post": {
         "operationId": "postReservationsByIdFolioCharges",
@@ -4868,6 +6479,196 @@
             }
           }
         },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/reservations/{id}/move-room": {
+      "post": {
+        "operationId": "postReservationsByIdMoveRoom",
+        "tags": [
+          "Reservations"
+        ],
+        "summary": "POST /reservations/:id/move-room",
+        "description": "**Requires permission:** `reservations:checkinout`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/reservations/{id}/no-show": {
+      "post": {
+        "operationId": "postReservationsByIdNoShow",
+        "tags": [
+          "Reservations"
+        ],
+        "summary": "POST /reservations/:id/no-show",
+        "description": "**Requires permission:** `reservations:checkinout`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/reservations/arrivals": {
+      "get": {
+        "operationId": "getReservationsArrivals",
+        "tags": [
+          "Reservations"
+        ],
+        "summary": "GET /reservations/arrivals",
+        "description": "**Requires authentication** (any role).",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        }
+      }
+    },
+    "/reservations/departures": {
+      "get": {
+        "operationId": "getReservationsDepartures",
+        "tags": [
+          "Reservations"
+        ],
+        "summary": "GET /reservations/departures",
+        "description": "**Requires authentication** (any role).",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        }
+      }
+    },
+    "/reservations/in-house": {
+      "get": {
+        "operationId": "getReservationsInHouse",
+        "tags": [
+          "Reservations"
+        ],
+        "summary": "GET /reservations/in-house",
+        "description": "**Requires authentication** (any role).",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        }
+      }
+    },
+    "/reservations/search": {
+      "get": {
+        "operationId": "getReservationsSearch",
+        "tags": [
+          "Reservations"
+        ],
+        "summary": "GET /reservations/search",
+        "description": "**Requires authentication** (any role).",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        }
+      }
+    },
+    "/reservations/walk-in": {
+      "post": {
+        "operationId": "postReservationsWalkIn",
+        "tags": [
+          "Reservations"
+        ],
+        "summary": "POST /reservations/walk-in",
+        "description": "**Requires permission:** `reservations:checkinout`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Success"
@@ -5485,6 +7286,126 @@
         }
       }
     },
+    "/room-types": {
+      "get": {
+        "operationId": "getRoomTypes",
+        "tags": [
+          "roomTypes"
+        ],
+        "summary": "GET /room-types",
+        "description": "**Requires permission:** `rates:read` or `rates:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postRoomTypes",
+        "tags": [
+          "roomTypes"
+        ],
+        "summary": "POST /room-types",
+        "description": "**Requires permission:** `rates:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/room-types/{id}": {
+      "delete": {
+        "operationId": "deleteRoomTypesById",
+        "tags": [
+          "roomTypes"
+        ],
+        "summary": "DELETE /room-types/:id",
+        "description": "**Requires permission:** `rates:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "patchRoomTypesById",
+        "tags": [
+          "roomTypes"
+        ],
+        "summary": "PATCH /room-types/:id",
+        "description": "**Requires permission:** `rates:manage`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
     "/rooms": {
       "get": {
         "operationId": "getRooms",
@@ -5492,6 +7413,29 @@
           "Rooms"
         ],
         "summary": "List rooms for the branch",
+        "description": "**Requires authentication** (any role).",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          }
+        }
+      }
+    },
+    "/rooms/assignment-board": {
+      "get": {
+        "operationId": "getRoomsAssignmentBoard",
+        "tags": [
+          "Rooms"
+        ],
+        "summary": "GET /rooms/assignment-board",
         "description": "**Requires authentication** (any role).",
         "security": [
           {
@@ -5620,6 +7564,142 @@
         }
       }
     },
+    "/settings/cancellation-policies": {
+      "get": {
+        "operationId": "getSettingsCancellationPolicies",
+        "tags": [
+          "Settings"
+        ],
+        "summary": "GET /settings/cancellation-policies",
+        "description": "**Requires permission:** `settings:cancellation` or `reservations:cancel`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postSettingsCancellationPolicies",
+        "tags": [
+          "Settings"
+        ],
+        "summary": "POST /settings/cancellation-policies",
+        "description": "**Requires permission:** `settings:cancellation`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/settings/cancellation-policies/{id}": {
+      "patch": {
+        "operationId": "patchSettingsCancellationPoliciesById",
+        "tags": [
+          "Settings"
+        ],
+        "summary": "PATCH /settings/cancellation-policies/:id",
+        "description": "**Requires permission:** `settings:cancellation`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/settings/document-sequences": {
+      "get": {
+        "operationId": "getSettingsDocumentSequences",
+        "tags": [
+          "Settings"
+        ],
+        "summary": "GET /settings/document-sequences",
+        "description": "**Requires permission:** `settings:documents`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "patchSettingsDocumentSequences",
+        "tags": [
+          "Settings"
+        ],
+        "summary": "PATCH /settings/document-sequences",
+        "description": "**Requires permission:** `settings:documents`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
     "/settings/me": {
       "get": {
         "operationId": "getSettingsMe",
@@ -5690,6 +7770,352 @@
           },
           "401": {
             "description": "Missing or invalid session"
+          }
+        }
+      }
+    },
+    "/settings/tax-codes": {
+      "get": {
+        "operationId": "getSettingsTaxCodes",
+        "tags": [
+          "Settings"
+        ],
+        "summary": "GET /settings/tax-codes",
+        "description": "**Requires permission:** `settings:tax`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postSettingsTaxCodes",
+        "tags": [
+          "Settings"
+        ],
+        "summary": "POST /settings/tax-codes",
+        "description": "**Requires permission:** `settings:tax`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/settings/tax-codes/{id}": {
+      "patch": {
+        "operationId": "patchSettingsTaxCodesById",
+        "tags": [
+          "Settings"
+        ],
+        "summary": "PATCH /settings/tax-codes/:id",
+        "description": "**Requires permission:** `settings:tax`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/settings/tax-codes/{id}/deactivate": {
+      "post": {
+        "operationId": "postSettingsTaxCodesByIdDeactivate",
+        "tags": [
+          "Settings"
+        ],
+        "summary": "POST /settings/tax-codes/:id/deactivate",
+        "description": "**Requires permission:** `settings:tax`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/settings/tax-codes/preview": {
+      "post": {
+        "operationId": "postSettingsTaxCodesPreview",
+        "tags": [
+          "Settings"
+        ],
+        "summary": "POST /settings/tax-codes/preview",
+        "description": "**Requires permission:** `settings:tax`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/settings/tax-exemptions": {
+      "get": {
+        "operationId": "getSettingsTaxExemptions",
+        "tags": [
+          "Settings"
+        ],
+        "summary": "GET /settings/tax-exemptions",
+        "description": "**Requires permission:** `settings:tax`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postSettingsTaxExemptions",
+        "tags": [
+          "Settings"
+        ],
+        "summary": "POST /settings/tax-exemptions",
+        "description": "**Requires permission:** `settings:tax`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/settings/tax-exemptions/{id}": {
+      "patch": {
+        "operationId": "patchSettingsTaxExemptionsById",
+        "tags": [
+          "Settings"
+        ],
+        "summary": "PATCH /settings/tax-exemptions/:id",
+        "description": "**Requires permission:** `settings:tax`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/settlements": {
+      "get": {
+        "operationId": "getSettlements",
+        "tags": [
+          "settlements"
+        ],
+        "summary": "GET /settlements",
+        "description": "**Requires permission:** `payments:reconcile` or `finance:read`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postSettlements",
+        "tags": [
+          "settlements"
+        ],
+        "summary": "POST /settlements",
+        "description": "**Requires permission:** `payments:reconcile`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/settlements/{id}/reconcile": {
+      "post": {
+        "operationId": "postSettlementsByIdReconcile",
+        "tags": [
+          "settlements"
+        ],
+        "summary": "POST /settlements/:id/reconcile",
+        "description": "**Requires permission:** `payments:reconcile`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/settlements/report": {
+      "get": {
+        "operationId": "getSettlementsReport",
+        "tags": [
+          "settlements"
+        ],
+        "summary": "GET /settlements/report",
+        "description": "**Requires permission:** `payments:reconcile` or `finance:read`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
           }
         }
       }
@@ -5885,6 +8311,32 @@
         ],
         "summary": "Sync & Deployment status (ST-02)",
         "description": "Includes real deployment fields (current version, update channel, pending force-update/rollback) alongside push/pull sync state.\n\n**Requires permission:** `admin:operations`",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid session"
+          },
+          "403": {
+            "description": "Authenticated but lacks the required permission"
+          }
+        }
+      }
+    },
+    "/updates/status": {
+      "get": {
+        "operationId": "getUpdatesStatus",
+        "tags": [
+          "updates"
+        ],
+        "summary": "GET /updates/status",
+        "description": "**Requires permission:** `admin:operations`",
         "security": [
           {
             "cookieAuth": []

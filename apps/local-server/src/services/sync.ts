@@ -10,7 +10,8 @@
 // step 8) and most of this dev environment's test runs won't have a
 // central server running at all.
 import { eq } from "drizzle-orm";
-import { db } from "../db/client.js";
+import { db, schemaVersion } from "../db/client.js";
+import { toKobo, fromKobo } from "../lib/money.js";
 import { syncState, branchSyncCache, branches } from "../db/schema.js";
 import { computeBranchSnapshot } from "./branchKpis.js";
 import { checkForUpdate, readCurrentVersion, applyUpdate } from "./updater/index.js";
@@ -56,8 +57,24 @@ async function push(): Promise<{ ok: boolean; error?: string }> {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Branch-Sync-Key": cfg.syncKey },
       body: JSON.stringify({
-        branchId: cfg.branchId, ...snapshot,
+        branchId: cfg.branchId,
+        // B2 boundary: central's schema still stores naira floats (B20
+        // migrates it), so the money fields convert here and ONLY here.
+        // Everything upstream of this line is integer kobo.
+        occupancyRate: snapshot.occupancyRate,
+        activeGuests: snapshot.activeGuests,
+        openIssues: snapshot.openIssues,
+        roomsTotal: snapshot.roomsTotal,
+        branchManagerName: snapshot.branchManagerName,
+        revenueToday: fromKobo(snapshot.revenueTodayKobo),
+        adr: fromKobo(snapshot.adrKobo),
+        revpar: fromKobo(snapshot.revparKobo),
         currentVersion: readCurrentVersion(),
+        // Backend Blueprint B1: report the applied schema version so central
+        // can see which properties are behind on migrations. Central stores
+        // it in B20; until then it is accepted and ignored, which is why
+        // this is safe to send now.
+        schemaVersion,
         lastUpdateStatus: state.lastUpdateStatus ?? undefined,
         // Only acknowledge (and let central clear) an instruction this
         // branch has actually recorded a result for -- see pull() below,
@@ -104,8 +121,13 @@ async function pull(): Promise<{ ok: boolean; error?: string }> {
     for (const b of body.branches) {
       const existing = db.select().from(branchSyncCache).where(eq(branchSyncCache.branchId, b.branchId)).get();
       const row = {
-        branchName: b.branchName, occupancyRate: b.occupancyRate, revenueToday: b.revenueToday,
-        activeGuests: b.activeGuests, openIssues: b.openIssues, roomsTotal: b.roomsTotal, adr: b.adr, revpar: b.revpar,
+        branchName: b.branchName, occupancyRate: b.occupancyRate,
+        // Inbound naira floats from central become kobo at ingest, so the
+        // cache holds the same integer minor units as everything else.
+        revenueTodayKobo: b.revenueToday == null ? null : toKobo(b.revenueToday),
+        adrKobo: b.adr == null ? null : toKobo(b.adr),
+        revparKobo: b.revpar == null ? null : toKobo(b.revpar),
+        activeGuests: b.activeGuests, openIssues: b.openIssues, roomsTotal: b.roomsTotal,
         branchManagerName: b.branchManagerName, lastSyncAt: b.lastSyncAt ? new Date(b.lastSyncAt) : null,
         lastSyncStatus: b.lastSyncStatus, snapshotAt: b.snapshotAt ? new Date(b.snapshotAt) : null, cachedAt: now,
       };

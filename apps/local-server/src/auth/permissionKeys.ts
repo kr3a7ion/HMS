@@ -26,6 +26,17 @@ export const PERMISSION_KEYS: PermissionKeyDef[] = [
   { key: "folio:write", label: "Dispute / adjust folio charges", module: "Billing" },
   { key: "folio:postcharge", label: "Post charges to a folio", module: "Billing" },
   { key: "finance:read", label: "Daily financial summary", module: "Billing" },
+  // Backend Blueprint B4. Deliberately NOT in the Front Desk set: voiding a
+  // posted charge is the single most abusable action in the app, so it sits
+  // with Finance/Management/Resident Officer. The blueprint writes these as
+  // `folio.void` / `finance.reports`; this codebase has used `module:action`
+  // since HR-03, so they keep that shape.
+  { key: "folio:void", label: "Void a posted charge or payment", module: "Billing" },
+  { key: "finance:reports", label: "Financial oversight reports (reversals, variance)", module: "Billing" },
+  // B5. Reopening a closed trading day rewrites what a finished day reported,
+  // so it sits above the day-to-day finance permissions -- FIN and the
+  // wildcard roles only.
+  { key: "finance:reopen_day", label: "Reopen a closed business day", module: "Billing" },
   { key: "reports:revenue", label: "Revenue report", module: "Billing" },
   { key: "reports:staff", label: "Staff performance report", module: "Billing" },
 
@@ -56,6 +67,48 @@ export const PERMISSION_KEYS: PermissionKeyDef[] = [
   { key: "doorlock:configure", label: "Configure door lock provider & room mapping", module: "Door Lock" },
 
   { key: "settings:branch", label: "Edit branch / property settings", module: "IT & Settings" },
+  // B6. Separate from settings:branch on purpose: a tax rate is a financial
+  // control, not an IT one. Getting it wrong misbills every guest and is a
+  // FIRS compliance problem, so it belongs with Finance -- IT keeps it too
+  // because IT is who configures a new property before Finance exists.
+  { key: "settings:tax", label: "Configure tax codes & exemptions", module: "Finance" },
+
+  // B7. Issuing is a front-desk action (the guest is at the desk at
+  // check-out); unwinding an issued document is not. Voiding and crediting
+  // are separate keys because they are different powers: a void says the
+  // document should never have existed, a credit note says it did and is
+  // being reduced.
+  { key: "invoices:issue", label: "Issue invoices, proformas and receipts", module: "Finance" },
+  { key: "invoices:void", label: "Void an issued invoice", module: "Finance" },
+  { key: "invoices:credit_note", label: "Raise credit notes against invoices", module: "Finance" },
+  { key: "settings:documents", label: "Configure document numbering", module: "Finance" },
+
+  // B9. Cancelling and WAIVING the penalty that comes with it are separate
+  // grants on purpose: without the split, every cancellation becomes free the
+  // moment a guest complains loudly enough at the desk.
+  { key: "reservations:cancel", label: "Cancel a reservation", module: "Front Office" },
+  { key: "reservations:waive_penalty", label: "Waive a cancellation penalty", module: "Finance" },
+  // Requesting and approving a refund are deliberately different people: a
+  // refund converts a recorded payment into cash out of the drawer.
+  { key: "finance:refund_request", label: "Request a refund", module: "Finance" },
+  { key: "finance:refund_approve", label: "Approve or reject a refund", module: "Finance" },
+  { key: "finance:refund_approve_high", label: "Approve a high-value refund (over the threshold)", module: "Finance" },
+  { key: "deposits:manage", label: "Hold, apply, refund and forfeit deposits", module: "Finance" },
+  { key: "settings:cancellation", label: "Configure cancellation policies", module: "Finance" },
+
+  // B23. Taking a payment is counter work; reconciling a bank payout against
+  // what the property recorded is not -- that is the control that catches a
+  // chargeback or a dropped transaction.
+  { key: "payments:take", label: "Take a payment", module: "Finance" },
+  { key: "payments:reconcile", label: "Reconcile settlements against recorded transactions", module: "Finance" },
+  { key: "settings:gateways", label: "Configure payment gateways", module: "Finance" },
+
+  // B8. Reading a rate and setting one are different jobs: the front desk
+  // quotes from the rate card all day, and revenue management owns what is
+  // on it.
+  { key: "rates:read", label: "View room types, rate plans and rates", module: "Revenue" },
+  { key: "rates:manage", label: "Set rates, rate plans and room types", module: "Revenue" },
+  { key: "inventory:calendar", label: "View the availability calendar", module: "Revenue" },
   { key: "admin:manage", label: "Manage staff accounts & system health", module: "IT & Settings" },
   { key: "admin:devices", label: "Manage authorized devices", module: "IT & Settings" },
   { key: "admin:operations", label: "Backups, sync, and platform audit log", module: "IT & Settings" },
@@ -69,6 +122,25 @@ export const PERMISSION_KEY_SET = new Set(PERMISSION_KEYS.map(p => p.key));
 
 export interface SystemRoleSeed { name: string; permissions: string[] | "*" }
 
+// ────────────────────────────────────────────────────────────────────────
+// READ THIS BEFORE ADDING A PERMISSION TO A ROLE BELOW.
+//
+// This seed is applied ONLY when the roles table is empty -- a fresh
+// install. After that the table is the live, operator-editable source of
+// truth and boot never overwrites it (db/client.ts), because a manager who
+// edits a built-in role must not have it reverted on restart.
+//
+// So editing this list alone changes nothing on an existing database. A new
+// key ALSO needs an additive UPDATE in that batch's migration; migration
+// 0006 has the pattern and the reasoning.
+//
+// This is not hypothetical. B4's `folio:void` and B5's `finance:reports` /
+// `finance:reopen_day` were added here and nowhere else, so on every
+// upgraded property they were unreachable by the roles meant to have them --
+// found during B6's live verification, months after both batches were called
+// complete. Migration 0006 repairs them.
+// ────────────────────────────────────────────────────────────────────────
+
 // Preserves the exact grantee set of every requireRole(...) call as it
 // existed before this system was built. Cross-checked key by key against
 // every routes/*.ts file's requireRole(...) argument list.
@@ -81,11 +153,22 @@ export const SYSTEM_ROLE_SEED: Record<string, SystemRoleSeed> = {
       "reservations:create", "reservations:checkinout", "guests:create",
       "folio:read", "folio:postcharge", "doorlock:use", "handover:use",
       "guests:message",
+      // B7: the guest is standing at the desk at check-out and needs an
+      // invoice and a receipt. Voiding one is a Finance control.
+      "invoices:issue",
+      // B9: cancelling is desk work; waiving the penalty is not.
+      "reservations:cancel", "finance:refund_request", "deposits:manage",
+      "payments:take",
+      // B8: the desk quotes from the rate card constantly; it does not set it.
+      "rates:read", "inventory:calendar",
     ],
   },
   RSV: {
     name: "Reservations Staff", permissions: [
       "reservations:create", "guests:create", "reports:occupancy", "reports:guests", "handover:use",
+      "invoices:issue",
+      "reservations:cancel", "finance:refund_request",
+      "rates:read", "inventory:calendar",
     ],
   },
   HK: {
@@ -103,12 +186,16 @@ export const SYSTEM_ROLE_SEED: Record<string, SystemRoleSeed> = {
     name: "Restaurant Staff", permissions: [
       "restaurant:manage", "restaurant:operate", "folio:postcharge",
       "inventory:read", "reports:inventory", "handover:use",
+      "payments:take",
     ],
   },
   RO: {
     name: "Resident Officer", permissions: [
       "housekeeping:inspect", "frontoffice:lostfound", "handover:use",
       "guests:message",
+      // B4: the Resident Officer is the overnight authority and is the one
+      // on site when a posting error surfaces at 2am.
+      "folio:void",
     ],
   },
   CS: {
@@ -120,6 +207,15 @@ export const SYSTEM_ROLE_SEED: Record<string, SystemRoleSeed> = {
   FIN: {
     name: "Finance / Accountant", permissions: [
       "folio:read", "folio:write", "folio:postcharge", "finance:read",
+      "folio:void", "finance:reports", "finance:reopen_day", "settings:tax",
+      "invoices:issue", "invoices:void", "invoices:credit_note", "settings:documents",
+      // B9. Note FIN does NOT hold finance:refund_approve_high -- a
+      // high-value refund escalates to MGT/ORG, who carry "*".
+      "reservations:cancel", "reservations:waive_penalty",
+      "finance:refund_request", "finance:refund_approve",
+      "deposits:manage", "settings:cancellation",
+      "payments:take", "payments:reconcile", "settings:gateways",
+      "rates:read", "rates:manage", "inventory:calendar",
       "inventory:read", "inventory:write", "purchasing:suppliers", "purchasing:orders",
       "hr:payroll", "reports:occupancy", "reports:revenue", "reports:inventory", "reports:staff",
       "handover:use",
@@ -127,8 +223,9 @@ export const SYSTEM_ROLE_SEED: Record<string, SystemRoleSeed> = {
   },
   IT: {
     name: "IT Department", permissions: [
-      "doorlock:use", "doorlock:configure", "settings:branch",
+      "doorlock:use", "doorlock:configure", "settings:branch", "settings:tax",
       "admin:manage", "admin:devices", "admin:operations", "roles:manage",
+      "settings:documents", "settings:cancellation", "settings:gateways", "rates:manage",
     ],
   },
 };

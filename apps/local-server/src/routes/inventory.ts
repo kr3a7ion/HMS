@@ -10,6 +10,9 @@ import { db } from "../db/client.js";
 import { products, stockTransactions, suppliers, purchaseOrders, purchaseOrderItems, users } from "../db/schema.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../auth/middleware.js";
 import { logAudit } from "../services/audit.js";
+import { transaction, immediateTransaction } from "../db/tx.js";
+import { HandlerError, isHandlerError } from "../lib/handlerError.js";
+import { addKobo, valueKobo } from "../lib/money.js";
 
 const router = Router();
 
@@ -24,7 +27,7 @@ router.get("/products", requireAuth, requirePermission("inventory:read"), (req: 
 
 const createProductSchema = z.object({
   itemCode: z.string().min(1), name: z.string().min(1), category: z.string().min(1), unit: z.string().min(1),
-  parLevel: z.number().nonnegative(), reorderThreshold: z.number().nonnegative(), unitCost: z.number().nonnegative(),
+  parLevel: z.number().nonnegative(), reorderThreshold: z.number().nonnegative(), unitCostKobo: z.number().int().nonnegative(),
   location: z.string().optional(), initialStock: z.number().nonnegative().default(0),
 });
 
@@ -37,7 +40,7 @@ router.post("/products", requireAuth, requirePermission("inventory:write"), (req
   db.insert(products).values({
     id, branchId: req.auth!.branchId, itemCode: parsed.data.itemCode, name: parsed.data.name,
     category: parsed.data.category, unit: parsed.data.unit, currentStock: parsed.data.initialStock,
-    parLevel: parsed.data.parLevel, reorderThreshold: parsed.data.reorderThreshold, unitCost: parsed.data.unitCost,
+    parLevel: parsed.data.parLevel, reorderThreshold: parsed.data.reorderThreshold, unitCostKobo: parsed.data.unitCostKobo,
     location: parsed.data.location, updatedAt: now,
   }).run();
   logAudit({ userId: req.auth!.userId, branchId: req.auth!.branchId, action: "product_created", module: "Inventory", recordId: id, details: parsed.data.name, ipAddress: req.ip });
@@ -109,7 +112,7 @@ router.get("/transactions", requireAuth, requirePermission("inventory:read"), (r
 router.get("/dashboard", requireAuth, requirePermission("inventory:read"), (req: AuthedRequest, res) => {
   const items = db.select().from(products).where(eq(products.branchId, req.auth!.branchId)).all();
   const lowStock = items.filter(p => p.currentStock <= p.reorderThreshold);
-  const totalValue = items.reduce((s, p) => s + p.currentStock * p.unitCost, 0);
+  const totalValueKobo = addKobo(...items.map(p => valueKobo(p.unitCostKobo, p.currentStock)));
   const recent = db.select({
     id: stockTransactions.id, type: stockTransactions.type, quantity: stockTransactions.quantity, createdAt: stockTransactions.createdAt,
     productName: products.name,
@@ -121,7 +124,7 @@ router.get("/dashboard", requireAuth, requirePermission("inventory:read"), (req:
     .limit(10)
     .all();
 
-  res.json({ totalItems: items.length, lowStockCount: lowStock.length, totalValue, lowStockItems: lowStock, recentTransactions: recent });
+  res.json({ totalItems: items.length, lowStockCount: lowStock.length, totalValueKobo, lowStockItems: lowStock, recentTransactions: recent });
 });
 
 // ─── Suppliers (IV-03) ──────────────────────────────────────────────────────
@@ -155,14 +158,14 @@ router.get("/purchase-orders", requireAuth, requirePermission("purchasing:orders
 
   const withTotals = rows.map(po => {
     const items = db.select().from(purchaseOrderItems).where(eq(purchaseOrderItems.purchaseOrderId, po.id)).all();
-    return { ...po, itemCount: items.length, total: items.reduce((s, i) => s + i.quantity * i.unitCost, 0) };
+    return { ...po, itemCount: items.length, total: addKobo(...items.map(i => valueKobo(i.unitCostKobo, i.quantity))) };
   });
   res.json(withTotals);
 });
 
 const createPoSchema = z.object({
   supplierId: z.string(),
-  items: z.array(z.object({ productId: z.string(), quantity: z.number().positive(), unitCost: z.number().nonnegative() })).min(1),
+  items: z.array(z.object({ productId: z.string(), quantity: z.number().positive(), unitCostKobo: z.number().int().nonnegative() })).min(1),
 });
 
 router.post("/purchase-orders", requireAuth, requirePermission("purchasing:orders"), (req: AuthedRequest, res) => {
@@ -177,11 +180,15 @@ router.post("/purchase-orders", requireAuth, requirePermission("purchasing:order
   const poCount = db.select().from(purchaseOrders).where(eq(purchaseOrders.branchId, req.auth!.branchId)).all().length;
   const poNumber = `PO-${String(poCount + 1).padStart(4, "0")}`;
 
-  db.insert(purchaseOrders).values({ id, branchId: req.auth!.branchId, poNumber, supplierId: supplier.id, status: "draft", createdBy: req.auth!.userId, createdAt: now }).run();
-  for (const item of parsed.data.items) {
-    db.insert(purchaseOrderItems).values({ id: nanoid(), purchaseOrderId: id, productId: item.productId, quantity: item.quantity, unitCost: item.unitCost }).run();
-  }
-  logAudit({ userId: req.auth!.userId, branchId: req.auth!.branchId, action: "purchase_order_created", module: "Inventory", recordId: id, details: poNumber, ipAddress: req.ip });
+  // Header + N line items are one unit: a PO with a missing line is a PO
+  // that will be received short and reconciled wrong.
+  transaction(() => {
+    db.insert(purchaseOrders).values({ id, branchId: req.auth!.branchId, poNumber, supplierId: supplier.id, status: "draft", createdBy: req.auth!.userId, createdAt: now }).run();
+    for (const item of parsed.data.items) {
+      db.insert(purchaseOrderItems).values({ id: nanoid(), purchaseOrderId: id, productId: item.productId, quantity: item.quantity, unitCostKobo: item.unitCostKobo }).run();
+    }
+    logAudit({ userId: req.auth!.userId, branchId: req.auth!.branchId, action: "purchase_order_created", module: "Inventory", recordId: id, details: poNumber, ipAddress: req.ip });
+  });
   res.status(201).json({ id, poNumber });
 });
 
@@ -196,14 +203,14 @@ router.get("/purchase-orders/:id", requireAuth, requirePermission("purchasing:or
   if (!po) return res.status(404).json({ error: "NOT_FOUND" });
   const supplier = db.select().from(suppliers).where(eq(suppliers.id, po.supplierId)).get();
   const items = db.select({
-    id: purchaseOrderItems.id, quantity: purchaseOrderItems.quantity, unitCost: purchaseOrderItems.unitCost,
+    id: purchaseOrderItems.id, quantity: purchaseOrderItems.quantity, unitCostKobo: purchaseOrderItems.unitCostKobo,
     productId: purchaseOrderItems.productId, productName: products.name, productUnit: products.unit,
   })
     .from(purchaseOrderItems)
     .leftJoin(products, eq(purchaseOrderItems.productId, products.id))
     .where(eq(purchaseOrderItems.purchaseOrderId, po.id))
     .all();
-  res.json({ ...po, supplier, items, total: items.reduce((s, i) => s + i.quantity * i.unitCost, 0) });
+  res.json({ ...po, supplier, items, total: addKobo(...items.map(i => valueKobo(i.unitCostKobo, i.quantity))) });
 });
 
 router.post("/purchase-orders/:id/send", requireAuth, requirePermission("purchasing:orders"), (req: AuthedRequest, res) => {
@@ -212,9 +219,11 @@ router.post("/purchase-orders/:id/send", requireAuth, requirePermission("purchas
   if (po.status !== "draft") return res.status(409).json({ error: "INVALID_STATUS", status: po.status });
 
   const now = new Date();
-  db.update(purchaseOrders).set({ status: "sent", sentAt: now }).where(eq(purchaseOrders.id, po.id)).run();
-  db.update(suppliers).set({ lastOrderDate: now }).where(eq(suppliers.id, po.supplierId)).run();
-  logAudit({ userId: req.auth!.userId, branchId: req.auth!.branchId, action: "purchase_order_sent", module: "Inventory", recordId: po.id, details: po.poNumber, ipAddress: req.ip });
+  transaction(() => {
+    db.update(purchaseOrders).set({ status: "sent", sentAt: now }).where(eq(purchaseOrders.id, po.id)).run();
+    db.update(suppliers).set({ lastOrderDate: now }).where(eq(suppliers.id, po.supplierId)).run();
+    logAudit({ userId: req.auth!.userId, branchId: req.auth!.branchId, action: "purchase_order_sent", module: "Inventory", recordId: po.id, details: po.poNumber, ipAddress: req.ip });
+  });
   res.json({ ok: true });
 });
 
@@ -226,19 +235,36 @@ router.post("/purchase-orders/:id/receive", requireAuth, requirePermission("purc
   if (!po) return res.status(404).json({ error: "NOT_FOUND" });
   if (po.status !== "sent") return res.status(409).json({ error: "INVALID_STATUS", status: po.status });
 
-  const items = db.select().from(purchaseOrderItems).where(eq(purchaseOrderItems.purchaseOrderId, po.id)).all();
-  for (const item of items) {
-    const product = db.select().from(products).where(eq(products.id, item.productId)).get();
-    if (!product) continue;
-    db.update(products).set({ currentStock: product.currentStock + item.quantity, updatedAt: new Date() }).where(eq(products.id, product.id)).run();
-    logStockChange(product.id, req.auth!.branchId, "in", item.quantity, po.poNumber, req.auth!.userId);
-  }
+  // Named in the blueprint as a known offender, and the worst of them: N
+  // stock transactions plus N product-quantity bumps plus the PO status.
+  // Failing part-way through leaves stock counted for some lines and not
+  // others, with the PO still "sent" -- so receiving it again double-counts
+  // the lines that did land. IMMEDIATE because the status check above is a
+  // check-then-write: two concurrent receives must not both pass it.
+  try {
+    immediateTransaction(() => {
+      const current = db.select().from(purchaseOrders).where(eq(purchaseOrders.id, po.id)).get();
+      if (!current) throw new HandlerError(404, "NOT_FOUND");
+      if (current.status !== "sent") throw new HandlerError(409, "INVALID_STATUS", { status: current.status });
 
-  db.update(purchaseOrders).set({ status: "received", receivedAt: new Date() }).where(eq(purchaseOrders.id, po.id)).run();
-  // The actual stock deltas are already itemized in stock_transactions
-  // (logStockChange above, per line item) -- this is just the PO lifecycle
-  // event itself, not a duplicate of that ledger.
-  logAudit({ userId: req.auth!.userId, branchId: req.auth!.branchId, action: "purchase_order_received", module: "Inventory", recordId: po.id, details: po.poNumber, ipAddress: req.ip });
+      const items = db.select().from(purchaseOrderItems).where(eq(purchaseOrderItems.purchaseOrderId, po.id)).all();
+      for (const item of items) {
+        const product = db.select().from(products).where(eq(products.id, item.productId)).get();
+        if (!product) continue;
+        db.update(products).set({ currentStock: product.currentStock + item.quantity, updatedAt: new Date() }).where(eq(products.id, product.id)).run();
+        logStockChange(product.id, req.auth!.branchId, "in", item.quantity, po.poNumber, req.auth!.userId);
+      }
+
+      db.update(purchaseOrders).set({ status: "received", receivedAt: new Date() }).where(eq(purchaseOrders.id, po.id)).run();
+      // The actual stock deltas are already itemized in stock_transactions
+      // (logStockChange above, per line item) -- this is just the PO lifecycle
+      // event itself, not a duplicate of that ledger.
+      logAudit({ userId: req.auth!.userId, branchId: req.auth!.branchId, action: "purchase_order_received", module: "Inventory", recordId: po.id, details: po.poNumber, ipAddress: req.ip });
+    });
+  } catch (err) {
+    if (isHandlerError(err)) return res.status(err.status).json({ error: err.code, ...err.detail });
+    throw err;
+  }
   res.json({ ok: true });
 });
 

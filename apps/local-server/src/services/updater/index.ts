@@ -8,8 +8,14 @@
 // registry/channel setup once before letting this run unattended.
 import fs from "node:fs";
 import path from "node:path";
-import { listTags } from "./registry.js";
+import { eq } from "drizzle-orm";
+import { db, schemaVersion } from "../../db/client.js";
+import { syncState } from "../../db/schema.js";
+import { listTags, resolveTagToDigest, type RegistryConfig } from "./registry.js";
 import { performContainerSwap } from "./containerSwap.js";
+import { verifyImageSignature, type ImageSignature } from "./signature.js";
+import { isRing, type BranchState, type Ring } from "./policy.js";
+import { performUpdate } from "./orchestrator.js";
 
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 11.1: "every 6 hours"
 
@@ -59,15 +65,105 @@ export async function checkForUpdate(channel: string, rollbackTarget: string | n
   return { currentVersion, status: updateAvailable ? "update_available" : "up_to_date", latestTag: target };
 }
 
+/**
+ * Applies an update, through B18's policy and rollback machinery.
+ *
+ * WHAT CHANGED IN B18. This used to resolve a tag and hand it straight to
+ * `performContainerSwap` -- a mutable tag, no signature check, no digest, no
+ * health check, no way back. That is the remote-code-execution path the
+ * Production blueprint calls the highest-severity issue in the repo.
+ *
+ * Now: resolve the tag to a DIGEST, verify a signature over that digest
+ * against a pinned key, run it past the policy (ring, schema downgrade), and
+ * only then swap -- with a health check and automatic rollback behind it.
+ */
 export async function applyUpdate(channel: string, rollbackTarget: string | null): Promise<{ ok: boolean; error?: string }> {
   if (process.env.NEXURA_ENABLE_AUTO_SWAP !== "true") {
     return { ok: false, error: "Auto-swap disabled (set NEXURA_ENABLE_AUTO_SWAP=true once Docker + registry are confirmed working)" };
   }
-  const image = process.env.NEXURA_REGISTRY_REPOSITORY;
-  if (!image) return { ok: false, error: "NEXURA_REGISTRY_REPOSITORY not set" };
+  const cfg = registryConfig();
+  if (!cfg) return { ok: false, error: "Registry not configured" };
+
   const tag = rollbackTarget ?? channel;
-  const result = await performContainerSwap(image, tag, "nexura-local");
-  return result.ok ? { ok: true } : { ok: false, error: `${result.step}: ${result.error}` };
+
+  // B18.3: resolve to a content digest FIRST. A tag can move between the
+  // signature check and the pull; a digest cannot.
+  const resolved = await resolveTagToDigest(cfg, tag);
+  if (!resolved.ok) return { ok: false, error: `Could not resolve "${tag}" to a digest: ${resolved.error}` };
+
+  // B18.2: the signature is checked over the digest, against keys pinned in
+  // this build. `fetchReleaseSignature` returning null means unsigned, which
+  // the policy refuses -- there is no path here that proceeds unverified.
+  const sig = await fetchReleaseSignature(cfg, resolved.digest);
+  const verification = verifyImageSignature(resolved.digest, sig);
+
+  const state = getSyncStateRow();
+  const branch: BranchState = {
+    ring: isRing(state?.updateRing ?? "general") ? (state!.updateRing as Ring) : "general",
+    currentDigest: state?.currentImageDigest ?? null,
+    dbSchemaVersion: schemaVersion,
+  };
+
+  const outcome = await performUpdate({
+    requestedRef: tag,
+    digest: resolved.digest,
+    // Without a release-metadata service, a release is treated as promoted
+    // only as far as `canary`. That is the SAFE assumption: a general-ring
+    // property refuses it, rather than every property taking an unvetted
+    // build because the metadata was missing. Central supplies the real value
+    // via sync (B20).
+    availableForRing: (state?.updateRing as Ring | undefined) && sig?.availableForRing
+      ? sig.availableForRing
+      : "canary",
+    schemaVersion: sig?.schemaVersion ?? schemaVersion,
+    signatureStatus: verification.status,
+    signatureKeyId: verification.keyId,
+  }, branch, {
+    swap: async (digest) => {
+      const result = await performContainerSwap(cfg.repository, digest, "nexura-local");
+      return result.ok ? { ok: true } : { ok: false, error: `${result.step}: ${result.error}` };
+    },
+    probeHealth: async () => {
+      try {
+        const res = await fetch(`http://127.0.0.1:${process.env.PORT ?? 4000}/health`, {
+          signal: AbortSignal.timeout(5_000),
+        });
+        if (!res.ok) return { healthy: false, detail: `health endpoint returned ${res.status}` };
+        const body = await res.json() as { ok?: boolean; schemaVersion?: number };
+        return body.ok
+          ? { healthy: true, detail: `ok, schema ${body.schemaVersion}` }
+          : { healthy: false, detail: "health endpoint reported not-ok" };
+      } catch (err) {
+        return { healthy: false, detail: err instanceof Error ? err.message : String(err) };
+      }
+    },
+  });
+
+  return outcome.status === "succeeded"
+    ? { ok: true }
+    : { ok: false, error: `${outcome.status}: ${outcome.detail}` };
+}
+
+/** The sync_state singleton, or null before the first boot writes it. */
+function getSyncStateRow() {
+  return db.select().from(syncState).where(eq(syncState.id, "singleton")).get() ?? null;
+}
+
+/**
+ * Fetches the signature published alongside an image.
+ *
+ * NOT IMPLEMENTED AGAINST A REAL REGISTRY, and deliberately returns null
+ * rather than a stub that would look like success: there is no release
+ * pipeline publishing signatures yet, and no registry to fetch them from.
+ * Returning null means "unsigned", which the policy refuses -- so the
+ * unfinished half fails CLOSED. When CI starts running `cosign sign`, this is
+ * the one function that changes.
+ */
+async function fetchReleaseSignature(
+  _cfg: RegistryConfig,
+  _digest: string,
+): Promise<(ImageSignature & { availableForRing?: Ring; schemaVersion?: number }) | null> {
+  return null;
 }
 
 let intervalHandle: ReturnType<typeof setInterval> | null = null;

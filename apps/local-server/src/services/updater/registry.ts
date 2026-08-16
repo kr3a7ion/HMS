@@ -50,3 +50,64 @@ export async function listTags(cfg: RegistryConfig): Promise<{ ok: true; tags: s
     return { ok: false, error: e instanceof Error ? e.message : "Registry unreachable" };
   }
 }
+
+// ─── Backend Blueprint B18.3 — resolve a tag to a content digest ─────────
+//
+// WHY THIS MATTERS MORE THAN IT LOOKS. A tag is a mutable pointer: `stable`
+// means whatever was last pushed to it. Verifying a signature and then
+// pulling by tag leaves a window in which the tag moved between the two --
+// which is precisely the attack, not a theoretical race. So the tag is
+// resolved to a `sha256:` digest ONCE, the signature is verified over that
+// digest, and the pull is by digest. What was verified is then necessarily
+// what runs.
+//
+// The registry returns the digest in the `Docker-Content-Digest` header of a
+// manifest request. The Accept headers are required: without them registries
+// return a v1 manifest whose digest differs from the v2 one.
+const MANIFEST_ACCEPT = [
+  "application/vnd.oci.image.index.v1+json",
+  "application/vnd.oci.image.manifest.v1+json",
+  "application/vnd.docker.distribution.manifest.list.v2+json",
+  "application/vnd.docker.distribution.manifest.v2+json",
+].join(", ");
+
+export async function resolveTagToDigest(
+  cfg: RegistryConfig,
+  tag: string,
+): Promise<{ ok: true; digest: string } | { ok: false; error: string }> {
+  const base = cfg.url.replace(/\/$/, "");
+  const url = `${base}/v2/${cfg.repository}/manifests/${encodeURIComponent(tag)}`;
+  const headers: Record<string, string> = { Accept: MANIFEST_ACCEPT };
+
+  try {
+    // HEAD is enough: the digest is a header, and the manifest body can be
+    // large.
+    let res = await fetch(url, { method: "HEAD", headers, signal: AbortSignal.timeout(10_000) });
+    if (res.status === 401) {
+      const challenge = res.headers.get("www-authenticate");
+      if (!challenge) return { ok: false, error: "Registry returned 401 without a WWW-Authenticate challenge" };
+      const token = await getBearerToken(challenge, cfg.username, cfg.password);
+      if (!token) return { ok: false, error: "Could not obtain a registry bearer token" };
+      res = await fetch(url, {
+        method: "HEAD",
+        headers: { ...headers, Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(10_000),
+      });
+    }
+    if (!res.ok) return { ok: false, error: `Registry returned ${res.status} for tag "${tag}"` };
+
+    const digest = res.headers.get("docker-content-digest");
+    if (!digest) {
+      // Refuse rather than falling back to the tag. A registry that will not
+      // tell us the content address cannot give the guarantee this whole
+      // mechanism depends on.
+      return { ok: false, error: "Registry did not return a Docker-Content-Digest header" };
+    }
+    if (!/^sha256:[a-f0-9]{64}$/.test(digest)) {
+      return { ok: false, error: `Registry returned a malformed digest: ${digest}` };
+    }
+    return { ok: true, digest };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}

@@ -4,7 +4,7 @@
 // must never regress silently. Verifies the two real safety gates
 // (Blueprint FD-01 step 3's "room must be clean" and FD-02's "can't check
 // out with a balance") actually block, not just that the happy path works.
-import { test, before, after } from "node:test";
+import { test, beforeAll as before, afterAll as after } from "vitest";
 import assert from "node:assert/strict";
 import http from "node:http";
 import os from "node:os";
@@ -57,7 +57,7 @@ before(async () => {
   orgId = nanoid();
   branchId = nanoid();
   db.insert(organizations).values({ id: orgId, name: "Test Org", createdAt: new Date() }).run();
-  db.insert(branches).values({ id: branchId, organizationId: orgId, name: "Test Branch", createdAt: new Date() }).run();
+  db.insert(branches).values({ id: branchId, organizationId: orgId, name: "Test Branch", createdAt: new Date(), currentBusinessDate: new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate())) }).run();
 
   const fdId = nanoid();
   db.insert(users).values({
@@ -88,7 +88,7 @@ test("full lifecycle: create -> check-in -> post charge -> check-out", async () 
 
   const createRes = await fetch(`${baseUrl}/reservations`, {
     method: "POST", headers: { "Content-Type": "application/json", Cookie: fdCookie },
-    body: JSON.stringify({ guestId, roomId, checkInDate: "2026-01-01", checkOutDate: "2026-01-03", rate: 50000 }),
+    body: JSON.stringify({ guestId, roomId, checkInDate: "2026-01-01", checkOutDate: "2026-01-03", rateKobo: 5_000_000 }),
   });
   assert.equal(createRes.status, 201);
   const reservation = await createRes.json() as { id: string; status: string };
@@ -101,39 +101,48 @@ test("full lifecycle: create -> check-in -> post charge -> check-out", async () 
   const checkedIn = await checkInRes.json() as { status: string };
   assert.equal(checkedIn.status, "checked_in");
 
-  // Check-in auto-posts the room-rate line item -- 2 nights * 50000, so the
-  // balance is already non-zero before any manual charge.
+  // B5 CHANGED THIS. Check-in no longer posts the room charge: the night
+  // audit posts one night per night, and check-out settles any nights the
+  // audit has not reached yet. So immediately after check-in the folio
+  // carries no room charge at all. Posting the whole stay at check-in (the
+  // old behaviour) put all of it into the arrival day's revenue, so
+  // occupancy said 1 room-night while revenue said 2 -- nothing reconciled.
   const detailRes = await fetch(`${baseUrl}/reservations/${reservation.id}`, { headers: { Cookie: fdCookie } });
-  const detail = await detailRes.json() as { folio: { balance: number } };
-  assert.equal(detail.folio.balance, 100000);
+  const detail = await detailRes.json() as { folio: { balanceKobo: number } };
+  assert.equal(detail.folio.balanceKobo, 0, "no room charge is posted at check-in any more (B5)");
 
   const chargeRes = await fetch(`${baseUrl}/reservations/${reservation.id}/folio/charges`, {
     method: "POST", headers: { "Content-Type": "application/json", Cookie: fdCookie },
-    body: JSON.stringify({ category: "Minibar", description: "Water x2", unitPrice: 2000 }),
+    body: JSON.stringify({ category: "Minibar", description: "Water x2", unitPriceKobo: 200_000 }),
   });
   assert.equal(chargeRes.status, 201);
-  const afterCharge = await chargeRes.json() as { balance: number };
-  assert.equal(afterCharge.balance, 102000);
+  const afterCharge = await chargeRes.json() as { balanceKobo: number };
+  assert.equal(afterCharge.balanceKobo, 200_000, "only the ₦2,000 minibar so far");
+
+  // Check-out settles the 2 outstanding room nights (2 x ₦50,000) on top of
+  // the minibar, so the balance to clear is ₦102,000 -- the same total the
+  // guest owed under the old behaviour, just posted at the right time and
+  // attributed to the right nights.
 
   // Can't check out with a balance outstanding.
   const shortCheckoutRes = await fetch(`${baseUrl}/reservations/${reservation.id}/check-out`, {
     method: "POST", headers: { "Content-Type": "application/json", Cookie: fdCookie },
-    body: JSON.stringify({ paymentAmount: 50000, paymentMethod: "cash" }),
+    body: JSON.stringify({ paymentAmountKobo: 5_000_000, paymentMethod: "cash" }),
   });
   assert.equal(shortCheckoutRes.status, 409);
-  const shortBody = await shortCheckoutRes.json() as { error: string; balance: number };
+  const shortBody = await shortCheckoutRes.json() as { error: string; balanceKobo: number };
   assert.equal(shortBody.error, "BALANCE_REMAINING");
-  assert.equal(shortBody.balance, 52000);
+  assert.equal(shortBody.balanceKobo, 5_200_000, "₦102,000 charged - ₦50,000 paid");
 
   // Full settlement succeeds and releases the room to Housekeeping.
   const fullCheckoutRes = await fetch(`${baseUrl}/reservations/${reservation.id}/check-out`, {
     method: "POST", headers: { "Content-Type": "application/json", Cookie: fdCookie },
-    body: JSON.stringify({ paymentAmount: 52000, paymentMethod: "cash" }),
+    body: JSON.stringify({ paymentAmountKobo: 5_200_000, paymentMethod: "cash" }),
   });
   assert.equal(fullCheckoutRes.status, 200);
-  const checkedOut = await fullCheckoutRes.json() as { status: string; folio: { balance: number } };
+  const checkedOut = await fullCheckoutRes.json() as { status: string; folio: { balanceKobo: number } };
   assert.equal(checkedOut.status, "checked_out");
-  assert.equal(checkedOut.folio.balance, 0);
+  assert.equal(checkedOut.folio.balanceKobo, 0, "fully settled folio must land exactly on zero");
 
   const { db } = await import("../db/client.js");
   const { rooms } = await import("../db/schema.js");
@@ -149,7 +158,7 @@ test("check-in is refused for a real reason (room not clean), not silently allow
 
   const createRes = await fetch(`${baseUrl}/reservations`, {
     method: "POST", headers: { "Content-Type": "application/json", Cookie: fdCookie },
-    body: JSON.stringify({ guestId, roomId, checkInDate: "2026-01-01", checkOutDate: "2026-01-02", rate: 30000 }),
+    body: JSON.stringify({ guestId, roomId, checkInDate: "2026-01-01", checkOutDate: "2026-01-02", rateKobo: 3_000_000 }),
   });
   const reservation = await createRes.json() as { id: string };
 
@@ -169,14 +178,14 @@ test("overlapping reservations on the same room are rejected with the conflictin
 
   const firstRes = await fetch(`${baseUrl}/reservations`, {
     method: "POST", headers: { "Content-Type": "application/json", Cookie: fdCookie },
-    body: JSON.stringify({ guestId: guestA, roomId, checkInDate: "2026-03-01", checkOutDate: "2026-03-05", rate: 40000 }),
+    body: JSON.stringify({ guestId: guestA, roomId, checkInDate: "2026-03-01", checkOutDate: "2026-03-05", rateKobo: 4_000_000 }),
   });
   const first = await firstRes.json() as { id: string };
   assert.equal(firstRes.status, 201);
 
   const overlapRes = await fetch(`${baseUrl}/reservations`, {
     method: "POST", headers: { "Content-Type": "application/json", Cookie: fdCookie },
-    body: JSON.stringify({ guestId: guestB, roomId, checkInDate: "2026-03-03", checkOutDate: "2026-03-07", rate: 40000 }),
+    body: JSON.stringify({ guestId: guestB, roomId, checkInDate: "2026-03-03", checkOutDate: "2026-03-07", rateKobo: 4_000_000 }),
   });
   assert.equal(overlapRes.status, 409);
   const body = await overlapRes.json() as { error: string; conflictingReservationId: string };
@@ -205,7 +214,7 @@ test("reservations:create is enforced -- a role without it gets a real 403", asy
   const guestId = await createGuest();
   const res = await fetch(`${baseUrl}/reservations`, {
     method: "POST", headers: { "Content-Type": "application/json", Cookie: cookie },
-    body: JSON.stringify({ guestId, roomId, checkInDate: "2026-04-01", checkOutDate: "2026-04-02", rate: 30000 }),
+    body: JSON.stringify({ guestId, roomId, checkInDate: "2026-04-01", checkOutDate: "2026-04-02", rateKobo: 3_000_000 }),
   });
   assert.equal(res.status, 403);
 });

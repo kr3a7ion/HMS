@@ -3,16 +3,25 @@ import { z } from "zod";
 import { nanoid } from "nanoid";
 import { and, eq, or, like } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { guests } from "../db/schema.js";
+import { guests, reservations, rooms } from "../db/schema.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../auth/middleware.js";
 import { logAudit } from "../services/audit.js";
 
 const router = Router();
 
-// FD-04/R-02 guest search (name or phone) — used by New Reservation's guest picker.
+// FD-04/R-02 guest search (name or phone) — used by New Reservation's guest
+// picker, and by FD-06 Guest Profiles as its list.
+//
+// The limit was a hardcoded 20, which is right for a type-ahead picker and
+// wrong for a directory screen: a property with 500 guests showed 20 and gave
+// no indication the rest existed. It is now a parameter with the picker's 20
+// as the default, capped so a caller cannot ask for the whole table.
 router.get("/", requireAuth, (req: AuthedRequest, res) => {
   const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
   const branchId = req.auth!.branchId;
+
+  const rawLimit = Number(req.query.limit);
+  const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.floor(rawLimit), 200) : 20;
 
   const rows = search
     ? db.select().from(guests).where(and(
@@ -22,10 +31,58 @@ router.get("/", requireAuth, (req: AuthedRequest, res) => {
           like(guests.lastName, `%${search}%`),
           like(guests.phone, `%${search}%`),
         ),
-      )).limit(20).all()
-    : db.select().from(guests).where(eq(guests.branchId, branchId)).limit(20).all();
+      )).limit(limit).all()
+    : db.select().from(guests).where(eq(guests.branchId, branchId)).limit(limit).all();
 
   res.json(rows);
+});
+
+// FD-06 Guest Profile Detail. Added for the UI adoption: the screen existed
+// and had nowhere to read from -- GET /guests returns a capped list and
+// nothing served a single guest, so the detail view could only have been
+// built by fetching the list and filtering client-side, which breaks the
+// moment a property has more than a page of guests.
+//
+// Stay history is included rather than left to a second request: it is the
+// entire point of a guest profile, and the alternative is every caller
+// re-deriving "reservations where guestId = this one".
+router.get("/:id", requireAuth, (req: AuthedRequest, res) => {
+  const branchId = req.auth!.branchId;
+  const guest = db.select().from(guests).where(and(
+    eq(guests.id, req.params.id),
+    eq(guests.branchId, branchId),
+  )).get();
+  if (!guest) return res.status(404).json({ error: "NOT_FOUND" });
+
+  const roomById = new Map(
+    db.select().from(rooms).where(eq(rooms.branchId, branchId)).all().map(r => [r.id, r]),
+  );
+  const stays = db.select().from(reservations).where(and(
+    eq(reservations.branchId, branchId),
+    eq(reservations.guestId, guest.id),
+  )).all()
+    .sort((a, b) => new Date(b.checkInDate).getTime() - new Date(a.checkInDate).getTime())
+    .map(r => ({
+      id: r.id,
+      checkInDate: r.checkInDate,
+      checkOutDate: r.checkOutDate,
+      status: r.status,
+      rateKobo: r.rateKobo,
+      roomNumber: r.roomId ? roomById.get(r.roomId)?.number ?? null : null,
+    }));
+
+  // Cancellations and no-shows are excluded from the count a clerk reads as
+  // "how often has this person stayed here" -- a booking that never happened
+  // is not a stay.
+  const completed = stays.filter(s => s.status === "checked_out" || s.status === "checked_in");
+
+  res.json({
+    ...guest,
+    stays,
+    totalStays: completed.length,
+    lastStayAt: completed[0]?.checkOutDate ?? null,
+    lifetimeValueKobo: completed.reduce((sum, s) => sum + s.rateKobo, 0),
+  });
 });
 
 const createGuestSchema = z.object({

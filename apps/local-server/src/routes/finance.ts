@@ -8,13 +8,14 @@ import { db } from "../db/client.js";
 import { reservations, guests, rooms, folioCharges, payments } from "../db/schema.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../auth/middleware.js";
 import { folioSummary } from "../services/folio.js";
+import { addKobo, subKobo } from "../lib/money.js";
 import { logAudit } from "../services/audit.js";
 
 const router = Router();
 
-function folioStatus(reservationStatus: string, disputed: boolean, balance: number): "open" | "closed" | "disputed" {
+function folioStatus(reservationStatus: string, disputed: boolean, balanceKobo: number): "open" | "closed" | "disputed" {
   if (disputed) return "disputed";
-  if (reservationStatus === "checked_out" && balance <= 0) return "closed";
+  if (reservationStatus === "checked_out" && balanceKobo <= 0) return "closed";
   return "open";
 }
 
@@ -47,11 +48,11 @@ router.get("/folios", requireAuth, requirePermission("folio:read"), (req: Authed
 
   let result = rows.map(r => {
     const folio = folioSummary(r.id);
-    return { ...r, totalCharges: folio.totalCharges, totalPaid: folio.totalPaid, balance: folio.balance, folioStatus: folioStatus(r.status, r.disputed, folio.balance) };
+    return { ...r, totalChargesKobo: folio.totalChargesKobo, totalPaidKobo: folio.totalPaidKobo, balanceKobo: folio.balanceKobo, folioStatus: folioStatus(r.status, r.disputed, folio.balanceKobo) };
   });
 
   if (statusFilter) result = result.filter(r => r.folioStatus === statusFilter);
-  if (minBalance) result = result.filter(r => r.balance > 0);
+  if (minBalance) result = result.filter(r => r.balanceKobo > 0);
 
   res.json(result);
 });
@@ -90,26 +91,26 @@ router.get("/daily-summary", requireAuth, requirePermission("finance:read"), (re
   const paymentRows = db.select().from(payments).where(and(gte(payments.receivedAt, dayStart), lte(payments.receivedAt, dayEnd))).all()
     .filter(p => branchReservationIds.has(p.reservationId));
 
-  const byCategory = new Map<string, { amount: number; txn: number }>();
+  const byCategory = new Map<string, { amountKobo: number; txn: number }>();
   for (const c of charges) {
-    const entry = byCategory.get(c.category) ?? { amount: 0, txn: 0 };
-    entry.amount += c.amount; entry.txn += 1;
+    const entry = byCategory.get(c.category) ?? { amountKobo: 0, txn: 0 };
+    entry.amountKobo = addKobo(entry.amountKobo, c.amountKobo); entry.txn += 1;
     byCategory.set(c.category, entry);
   }
   const byMethod = new Map<string, number>();
-  for (const p of paymentRows) byMethod.set(p.method, (byMethod.get(p.method) ?? 0) + p.amount);
+  for (const p of paymentRows) byMethod.set(p.method, addKobo(byMethod.get(p.method) ?? 0, p.amountKobo));
 
-  const totalRevenue = charges.reduce((s, c) => s + c.amount, 0);
-  const totalPayments = paymentRows.reduce((s, p) => s + p.amount, 0);
+  const totalRevenueKobo = addKobo(...charges.map(c => c.amountKobo));
+  const totalPaymentsKobo = addKobo(...paymentRows.map(p => p.amountKobo));
 
   res.json({
     date: dateParam,
-    totalRevenue,
+    totalRevenueKobo,
     transactionCount: charges.length,
     revenueByCategory: Array.from(byCategory.entries()).map(([category, v]) => ({ category, ...v })),
-    paymentsByMethod: Array.from(byMethod.entries()).map(([method, amount]) => ({ method, amount })),
-    totalPayments,
-    outstandingBalance: totalRevenue - totalPayments,
+    paymentsByMethod: Array.from(byMethod.entries()).map(([method, amountKobo]) => ({ method, amountKobo })),
+    totalPaymentsKobo,
+    outstandingBalanceKobo: subKobo(totalRevenueKobo, totalPaymentsKobo),
   });
 });
 

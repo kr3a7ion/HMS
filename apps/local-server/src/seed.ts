@@ -8,6 +8,9 @@ import { nanoid } from "nanoid";
 import { db, sqlite } from "./db/client.js";
 import { organizations, branches, users, rooms, guests, reservations, folioCharges, payments, menuCategories, menuItems, restaurantTables, chatChannels, products, suppliers, attendance, shifts, leaveRequests, staffNotes } from "./db/schema.js";
 import { hashPassword } from "./auth/passwords.js";
+import { toKobo, mulKobo } from "./lib/money.js";
+import { claimRoomNights } from "./services/roomInventory.js";
+import { businessDateOf } from "./lib/businessDate.js";
 
 const DEMO_PASSWORD = "demo123";
 
@@ -23,10 +26,12 @@ async function seed() {
   const branchId = nanoid();
 
   db.insert(organizations).values({ id: orgId, name: "Grand Palms", createdAt: now }).run();
-  db.insert(branches).values({ id: branchId, organizationId: orgId, name: "Abuja Branch", createdAt: now }).run();
+  db.insert(branches).values({ id: branchId, organizationId: orgId, name: "Abuja Branch", createdAt: now, currentBusinessDate: businessDateOf(now) }).run();
 
   const passwordHash = await hashPassword(DEMO_PASSWORD);
 
+  // Money literals below are in NAIRA for readability and are converted to
+  // kobo via toKobo() at insert -- the sanctioned boundary conversion (B2).
   const demoUsers: Array<{ email: string; role: string; firstName: string; lastName: string; department: string; phone: string; payRate: number; startDate: Date }> = [
     { email: "owner@grandpalms.ng", role: "ORG", firstName: "Amaka", lastName: "Owner", department: "Management", phone: "+234 801 000 0001", payRate: 800000, startDate: new Date("2021-03-01") },
     { email: "manager@grandpalms.ng", role: "MGT", firstName: "Tunde", lastName: "Manager", department: "Management", phone: "+234 801 000 0002", payRate: 450000, startDate: new Date("2021-06-15") },
@@ -55,7 +60,7 @@ async function seed() {
       employeeId: `EMP-${String(i + 1).padStart(4, "0")}`,
       department: u.department,
       phone: u.phone,
-      payRate: u.payRate,
+      payRateKobo: toKobo(u.payRate),
       startDate: u.startDate,
     }).run();
   }
@@ -102,20 +107,27 @@ async function seed() {
 
   const checkIn = new Date();
   const checkOut = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+  const liveReservationId = nanoid();
   db.insert(reservations).values({
-    id: nanoid(),
+    id: liveReservationId,
     branchId,
     guestId,
     roomId: roomIds[0],
     checkInDate: checkIn,
     checkOutDate: checkOut,
     status: "confirmed",
-    rate: 42000,
+    rateKobo: toKobo(42000),
     adults: 1,
     children: 0,
     createdBy: userIds["FD"],
     createdAt: now,
   }).run();
+  // Seeded reservations must claim their room-nights too (B3). The seed
+  // writes to the tables directly rather than going through the routes, so
+  // without this a freshly seeded database has reservations that hold no
+  // inventory -- and the double-booking guard would happily let the API
+  // rebook a room the demo data already occupies.
+  claimRoomNights(branchId, roomIds[0], liveReservationId, checkIn, checkOut);
 
   // A handful of completed/cancelled/no-show stays in the recent past so
   // RP-01 Occupancy, RP-02 Revenue, and RP-04 Guest Analytics have real
@@ -141,16 +153,22 @@ async function seed() {
     const hCheckOut = new Date(hCheckIn.getTime() + h.nights * 24 * 60 * 60 * 1000);
     db.insert(reservations).values({
       id: resId, branchId, guestId: historyGuestIds[key], roomId: roomIds[h.room],
-      checkInDate: hCheckIn, checkOutDate: hCheckOut, status: h.status, rate: h.rate,
+      checkInDate: hCheckIn, checkOutDate: hCheckOut, status: h.status, rateKobo: toKobo(h.rate),
       adults: 1, children: 0, createdBy: userIds["FD"], createdAt: hCheckIn,
     }).run();
+    // Cancelled and no-show stays never occupied the room, so they claim
+    // nothing -- matching migration 0003's backfill rule exactly.
+    if (h.status !== "cancelled" && h.status !== "no_show") {
+      claimRoomNights(branchId, roomIds[h.room], resId, hCheckIn, hCheckOut);
+    }
     if (h.status === "checked_out") {
-      const amount = h.rate * h.nights;
+      const amountKobo = mulKobo(toKobo(h.rate), h.nights);
       db.insert(folioCharges).values({
         id: nanoid(), reservationId: resId, category: "Room", description: `Room charge (${h.nights} nights)`,
-        quantity: h.nights, unitPrice: h.rate, amount, postedBy: userIds["FD"], postedAt: hCheckIn,
+        quantity: h.nights, unitPriceKobo: toKobo(h.rate), amountKobo, postedBy: userIds["FD"], postedAt: hCheckIn,
+        businessDate: businessDateOf(hCheckIn),
       }).run();
-      db.insert(payments).values({ id: nanoid(), reservationId: resId, amount, method: "card", receivedBy: userIds["FD"], receivedAt: hCheckOut }).run();
+      db.insert(payments).values({ id: nanoid(), reservationId: resId, amountKobo, method: "card", receivedBy: userIds["FD"], receivedAt: hCheckOut, businessDate: businessDateOf(hCheckOut) }).run();
     }
   }
 
@@ -164,7 +182,7 @@ async function seed() {
     const catId = nanoid();
     db.insert(menuCategories).values({ id: catId, branchId, name: catName, sortOrder: 0 }).run();
     for (const [name, price] of items) {
-      db.insert(menuItems).values({ id: nanoid(), branchId, categoryId: catId, name, price: Number(price), available: true }).run();
+      db.insert(menuItems).values({ id: nanoid(), branchId, categoryId: catId, name, priceKobo: toKobo(Number(price)), available: true }).run();
     }
   }
   for (const label of ["T01", "T02", "T03", "T04", "T05", "T06"]) {
@@ -190,7 +208,7 @@ async function seed() {
     productIds.push(id);
     db.insert(products).values({
       id, branchId, itemCode: p.code, name: p.name, category: p.category, unit: p.unit,
-      currentStock: p.stock, parLevel: p.par, reorderThreshold: p.reorder, unitCost: p.cost, updatedAt: now,
+      currentStock: p.stock, parLevel: p.par, reorderThreshold: p.reorder, unitCostKobo: toKobo(p.cost), updatedAt: now,
     }).run();
   }
 

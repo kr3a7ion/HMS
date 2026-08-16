@@ -21,6 +21,8 @@ import {
   revokeCredential, revokeCredentialsForRoom, getDoorLockConfig,
 } from "../services/locks/access.js";
 import { logAudit } from "../services/audit.js";
+import { encryptSecret } from "../lib/secrets.js";
+import { transaction } from "../db/tx.js";
 
 const router = Router();
 
@@ -68,6 +70,13 @@ router.post("/config", requireAuth, requirePermission("doorlock:configure"), (re
   const next = { ...parsed.data };
   if (next.clientSecret === "") delete next.clientSecret;
   if (next.password === "") delete next.password;
+  // Backend Blueprint B0.3: these two are third-party credentials and are
+  // the only fields here worth stealing. Encrypt before they touch the
+  // database -- see lib/secrets.ts for the threat model this covers.
+  if (next.clientSecret !== undefined) next.clientSecret = encryptSecret(next.clientSecret);
+  if (next.password !== undefined) next.password = encryptSecret(next.password);
+  // Upsert + audit as one unit.
+  transaction(() => {
   if (existing) {
     db.update(doorLockConfig).set(next).where(eq(doorLockConfig.branchId, branchId)).run();
   } else {
@@ -76,6 +85,7 @@ router.post("/config", requireAuth, requirePermission("doorlock:configure"), (re
   // Field names only, never values -- this endpoint's payload can include
   // clientSecret/password.
   logAudit({ userId: req.auth!.userId, branchId, action: "doorlock_config_updated", module: "IT & Settings", details: Object.keys(next).join(", "), ipAddress: req.ip });
+  });
   res.json(serializeConfig(getDoorLockConfig(branchId)));
 });
 
@@ -102,10 +112,12 @@ router.post("/room-mapping", requireAuth, requirePermission("doorlock:configure"
   if (!parsed.success) return res.status(400).json({ error: "INVALID_INPUT" });
   const room = db.select().from(rooms).where(and(eq(rooms.id, parsed.data.roomId), eq(rooms.branchId, req.auth!.branchId))).get();
   if (!room) return res.status(404).json({ error: "ROOM_NOT_FOUND" });
-  const existing = db.select().from(roomLockMappings).where(eq(roomLockMappings.roomId, parsed.data.roomId)).get();
-  if (existing) db.update(roomLockMappings).set(parsed.data).where(eq(roomLockMappings.roomId, parsed.data.roomId)).run();
-  else db.insert(roomLockMappings).values(parsed.data).run();
-  logAudit({ userId: req.auth!.userId, branchId: req.auth!.branchId, action: "room_lock_mapping_updated", module: "IT & Settings", recordId: room.id, details: `Room ${room.number} -> ${parsed.data.lockName}`, ipAddress: req.ip });
+  transaction(() => {
+    const existing = db.select().from(roomLockMappings).where(eq(roomLockMappings.roomId, parsed.data.roomId)).get();
+    if (existing) db.update(roomLockMappings).set(parsed.data).where(eq(roomLockMappings.roomId, parsed.data.roomId)).run();
+    else db.insert(roomLockMappings).values(parsed.data).run();
+    logAudit({ userId: req.auth!.userId, branchId: req.auth!.branchId, action: "room_lock_mapping_updated", module: "IT & Settings", recordId: room.id, details: `Room ${room.number} -> ${parsed.data.lockName}`, ipAddress: req.ip });
+  });
   res.json({ ok: true });
 });
 
@@ -121,19 +133,25 @@ router.post("/room-mapping/auto-map", requireAuth, requirePermission("doorlock:c
   const branchRooms = db.select().from(rooms).where(eq(rooms.branchId, branchId)).all();
   const matched: Array<{ roomNumber: string; lockName: string }> = [];
   const unmatched: string[] = [];
-  for (const room of branchRooms) {
-    const lock = locks.find(l => l.lockName.toLowerCase().includes(room.number.toLowerCase()));
-    if (lock) {
-      const existing = db.select().from(roomLockMappings).where(eq(roomLockMappings.roomId, room.id)).get();
-      const row = { roomId: room.id, ttlockLockId: lock.lockId, lockName: lock.lockName };
-      if (existing) db.update(roomLockMappings).set(row).where(eq(roomLockMappings.roomId, room.id)).run();
-      else db.insert(roomLockMappings).values(row).run();
-      matched.push({ roomNumber: room.number, lockName: lock.lockName });
-    } else {
-      unmatched.push(room.number);
+  // All-or-nothing: a half-applied auto-map is worse than none, because the
+  // report returned to the operator would not match what was actually
+  // saved. The TTLock call itself is already done and outside the
+  // transaction -- network I/O must not be holding a write lock.
+  transaction(() => {
+    for (const room of branchRooms) {
+      const lock = locks.find(l => l.lockName.toLowerCase().includes(room.number.toLowerCase()));
+      if (lock) {
+        const existing = db.select().from(roomLockMappings).where(eq(roomLockMappings.roomId, room.id)).get();
+        const row = { roomId: room.id, ttlockLockId: lock.lockId, lockName: lock.lockName };
+        if (existing) db.update(roomLockMappings).set(row).where(eq(roomLockMappings.roomId, room.id)).run();
+        else db.insert(roomLockMappings).values(row).run();
+        matched.push({ roomNumber: room.number, lockName: lock.lockName });
+      } else {
+        unmatched.push(room.number);
+      }
     }
-  }
-  logAudit({ userId: req.auth!.userId, branchId, action: "room_lock_auto_mapped", module: "IT & Settings", details: `${matched.length} matched, ${unmatched.length} unmatched`, ipAddress: req.ip });
+    logAudit({ userId: req.auth!.userId, branchId, action: "room_lock_auto_mapped", module: "IT & Settings", details: `${matched.length} matched, ${unmatched.length} unmatched`, ipAddress: req.ip });
+  });
   res.json({ matched, unmatched });
 });
 

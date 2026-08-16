@@ -15,8 +15,9 @@ import {
   reservations, guests, rooms, folioCharges, payments, workOrders, workOrderEvents,
   restaurantOrders, restaurantOrderItems, restaurantTables, inspections, users,
 } from "../db/schema.js";
-import { requireAuth, type AuthedRequest } from "../auth/middleware.js";
+import { requireAuth, requirePermission, type AuthedRequest } from "../auth/middleware.js";
 import { computeBranchSnapshot } from "../services/branchKpis.js";
+import { addKobo, valueKobo } from "../lib/money.js";
 
 const router = Router();
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -35,7 +36,7 @@ function recentActivity(branchId: string, limit: number) {
   const branchResIds = new Set(db.select({ id: reservations.id }).from(reservations).where(eq(reservations.branchId, branchId)).all().map(r => r.id));
 
   const charges = db.select({
-    id: folioCharges.id, postedAt: folioCharges.postedAt, category: folioCharges.category, description: folioCharges.description, amount: folioCharges.amount, reservationId: folioCharges.reservationId,
+    id: folioCharges.id, postedAt: folioCharges.postedAt, category: folioCharges.category, description: folioCharges.description, amountKobo: folioCharges.amountKobo, reservationId: folioCharges.reservationId,
   }).from(folioCharges).where(gte(folioCharges.postedAt, start)).all().filter(c => branchResIds.has(c.reservationId));
   const chargeEvents = charges.map(c => {
     const res = db.select({ roomId: reservations.roomId, guestId: reservations.guestId }).from(reservations).where(eq(reservations.id, c.reservationId)).get();
@@ -44,7 +45,7 @@ function recentActivity(branchId: string, limit: number) {
     const guestName = guest ? `${guest.firstName} ${guest.lastName}` : "Guest";
     return {
       type: "charge" as const, time: c.postedAt, refId: c.id, actor: guestName, room: room?.number ?? null,
-      label: `${c.category} charge posted`, detail: `${guestName}${room ? ` · Room ${room.number}` : ""} · ₦${c.amount.toLocaleString()}`,
+      label: `${c.category} charge posted`, detail: `${guestName}${room ? ` · Room ${room.number}` : ""} · ₦${c.amountKobo.toLocaleString()}`,
     };
   });
 
@@ -62,14 +63,14 @@ function recentActivity(branchId: string, limit: number) {
       };
     });
 
-  const closedOrders = db.select({ closedAt: restaurantOrders.closedAt, id: restaurantOrders.id, tableId: restaurantOrders.tableId, paidAmount: restaurantOrders.paidAmount })
+  const closedOrders = db.select({ closedAt: restaurantOrders.closedAt, id: restaurantOrders.id, tableId: restaurantOrders.tableId, paidAmountKobo: restaurantOrders.paidAmountKobo })
     .from(restaurantOrders).where(and(eq(restaurantOrders.branchId, branchId), eq(restaurantOrders.status, "closed"), gte(restaurantOrders.closedAt, start))).all()
     .map(o => {
       const table = o.tableId ? db.select({ label: restaurantTables.label }).from(restaurantTables).where(eq(restaurantTables.id, o.tableId)).get() : null;
       const roomLabel = table ? `Table ${table.label}` : "Room Service";
       return {
         type: "restaurant" as const, time: o.closedAt!, refId: o.id, actor: "Restaurant", room: roomLabel,
-        label: "Restaurant order closed", detail: `${roomLabel}${o.paidAmount ? ` · ₦${o.paidAmount.toLocaleString()}` : ""}`,
+        label: "Restaurant order closed", detail: `${roomLabel}${o.paidAmountKobo ? ` · ₦${o.paidAmountKobo.toLocaleString()}` : ""}`,
       };
     });
 
@@ -116,8 +117,8 @@ router.get("/me", requireAuth, (req: AuthedRequest, res) => {
     const departures = db.select().from(reservations).where(and(eq(reservations.branchId, branchId), eq(reservations.status, "checked_in"), gte(reservations.checkOutDate, start), lte(reservations.checkOutDate, end))).all();
     const inHouse = db.select().from(reservations).where(and(eq(reservations.branchId, branchId), eq(reservations.status, "checked_in"))).all();
     const outstanding = inHouse.reduce((sum, r) => {
-      const charges = db.select().from(folioCharges).where(eq(folioCharges.reservationId, r.id)).all().reduce((s, c) => s + c.amount, 0);
-      const paid = db.select().from(payments).where(eq(payments.reservationId, r.id)).all().reduce((s, p) => s + p.amount, 0);
+      const charges = db.select().from(folioCharges).where(eq(folioCharges.reservationId, r.id)).all().reduce((s, c) => addKobo(s, c.amountKobo), 0);
+      const paid = db.select().from(payments).where(eq(payments.reservationId, r.id)).all().reduce((s, p) => addKobo(s, p.amountKobo), 0);
       return sum + Math.max(0, charges - paid);
     }, 0);
     return res.json({
@@ -172,15 +173,15 @@ router.get("/me", requireAuth, (req: AuthedRequest, res) => {
     const todayPayments = db.select().from(payments).where(and(gte(payments.receivedAt, start), lte(payments.receivedAt, end))).all().filter(p => branchResIds.has(p.reservationId));
     const inHouse = db.select().from(reservations).where(and(eq(reservations.branchId, branchId), eq(reservations.status, "checked_in"))).all();
     const outstanding = inHouse.reduce((sum, r) => {
-      const charges = db.select().from(folioCharges).where(eq(folioCharges.reservationId, r.id)).all().reduce((s, c) => s + c.amount, 0);
-      const paid = db.select().from(payments).where(eq(payments.reservationId, r.id)).all().reduce((s, p) => s + p.amount, 0);
+      const charges = db.select().from(folioCharges).where(eq(folioCharges.reservationId, r.id)).all().reduce((s, c) => addKobo(s, c.amountKobo), 0);
+      const paid = db.select().from(payments).where(eq(payments.reservationId, r.id)).all().reduce((s, p) => addKobo(s, p.amountKobo), 0);
       return sum + Math.max(0, charges - paid);
     }, 0);
     return res.json({
       role, stats: [
-        { label: "Revenue Today", value: todayCharges.reduce((s, c) => s + c.amount, 0), isCurrency: true, sub: "All categories" },
+        { label: "Revenue Today", value: addKobo(...todayCharges.map(c => c.amountKobo)), isCurrency: true, sub: "All categories" },
         { label: "Outstanding Balance", value: outstanding, isCurrency: true, sub: `${inHouse.length} in-house folios` },
-        { label: "Payments Received", value: todayPayments.reduce((s, p) => s + p.amount, 0), isCurrency: true, sub: "Cash + card + transfer" },
+        { label: "Payments Received", value: addKobo(...todayPayments.map(p => p.amountKobo)), isCurrency: true, sub: "Cash + card + transfer" },
         // Real, structural zero -- no discount/approval workflow exists
         // anywhere in this codebase yet (Rate Management has no discount
         // flow built), not a fabricated figure.
@@ -197,7 +198,7 @@ router.get("/me", requireAuth, (req: AuthedRequest, res) => {
     const todayCharges = db.select().from(restaurantOrders).where(and(eq(restaurantOrders.branchId, branchId), eq(restaurantOrders.status, "closed"), gte(restaurantOrders.closedAt, start), lte(restaurantOrders.closedAt, end))).all();
     const todayRevenue = todayCharges.reduce((sum, o) => {
       const items = db.select().from(restaurantOrderItems).where(eq(restaurantOrderItems.orderId, o.id)).all();
-      return sum + items.reduce((s, i) => s + i.quantity * i.unitPrice, 0);
+      return sum + addKobo(...items.map(i => valueKobo(i.unitPriceKobo, i.quantity)));
     }, 0);
     return res.json({
       role, stats: [
@@ -218,7 +219,7 @@ router.get("/me", requireAuth, (req: AuthedRequest, res) => {
   res.json({
     role, stats: [
       { label: "Occupancy Rate", value: branchRooms.length > 0 ? Math.round((inHouse.length / branchRooms.length) * 100) : 0, isPercent: true, sub: `${inHouse.length} of ${branchRooms.length} rooms occupied` },
-      { label: "Revenue Today", value: todayCharges.reduce((s, c) => s + c.amount, 0), isCurrency: true, sub: "All categories" },
+      { label: "Revenue Today", value: addKobo(...todayCharges.map(c => c.amountKobo)), isCurrency: true, sub: "All categories" },
       { label: "Active Guests", value: inHouse.length, sub: "Currently in house" },
       { label: "Open Issues", value: openWork.length, sub: "Open work orders" },
     ],
@@ -227,7 +228,17 @@ router.get("/me", requireAuth, (req: AuthedRequest, res) => {
 });
 
 // ─── D-02 Management Overview ───────────────────────────────────────────────
-router.get("/overview", requireAuth, (req: AuthedRequest, res) => {
+//
+// A REAL GAP FOUND BY B17.7's ROUTE AUDIT, not by review. This carried
+// `requireAuth` and nothing else, so every authenticated member of staff --
+// a housekeeper, a waiter, a maintenance technician -- could read the
+// property's 7-day revenue trend, occupancy and ADR. Nothing in the handler
+// checked anything; the screen is called "Management Overview" and the
+// endpoint behind it was open to everyone with a login.
+//
+// Gated on the same grants the revenue reports already use, so nobody who
+// could not already see these figures loses access.
+router.get("/overview", requireAuth, requirePermission("reports:revenue", "finance:read"), (req: AuthedRequest, res) => {
   const branchId = req.auth!.branchId;
   const { start, end } = todayRange();
   const branchRooms = db.select().from(rooms).where(eq(rooms.branchId, branchId)).all();
@@ -241,7 +252,7 @@ router.get("/overview", requireAuth, (req: AuthedRequest, res) => {
     const dayStart = new Date(`${day}T00:00:00.000Z`);
     const dayEnd = new Date(`${day}T23:59:59.999Z`);
     const occupied = allActiveRes.filter(r => r.checkInDate <= dayEnd && r.checkOutDate > dayStart).length;
-    const revenue = db.select().from(folioCharges).where(and(gte(folioCharges.postedAt, dayStart), lte(folioCharges.postedAt, dayEnd))).all().filter(c => branchResIds.has(c.reservationId)).reduce((s, c) => s + c.amount, 0);
+    const revenue = db.select().from(folioCharges).where(and(gte(folioCharges.postedAt, dayStart), lte(folioCharges.postedAt, dayEnd))).all().filter(c => branchResIds.has(c.reservationId)).reduce((s, c) => s + c.amountKobo, 0);
     return { date: day, occupancy: branchRooms.length > 0 ? Math.round((occupied / branchRooms.length) * 1000) / 10 : 0, revenue };
   });
 
@@ -251,7 +262,7 @@ router.get("/overview", requireAuth, (req: AuthedRequest, res) => {
 
   const todayCharges = db.select().from(folioCharges).where(and(gte(folioCharges.postedAt, start), lte(folioCharges.postedAt, end))).all().filter(c => branchResIds.has(c.reservationId));
   const byCategory = new Map<string, number>();
-  for (const c of todayCharges) byCategory.set(c.category, (byCategory.get(c.category) ?? 0) + c.amount);
+  for (const c of todayCharges) byCategory.set(c.category, addKobo(byCategory.get(c.category) ?? 0, c.amountKobo));
 
   // occupancyRate/revpar come from the shared snapshot helper so this
   // screen and the sync client (services/sync.ts) can never disagree on
@@ -266,12 +277,12 @@ router.get("/overview", requireAuth, (req: AuthedRequest, res) => {
 
   res.json({
     occupancyRate: snapshot.occupancyRate,
-    revpar: snapshot.revpar,
+    revparKobo: snapshot.revparKobo,
     inHouseCount: inHouse.length,
     arrivalsToday: arrivals.length,
     departuresToday: departures.length,
-    revenueToday: todayCharges.reduce((s, c) => s + c.amount, 0),
-    revenueByCategory: Array.from(byCategory.entries()).map(([category, amount]) => ({ category, amount })),
+    revenueTodayKobo: addKobo(...todayCharges.map(c => c.amountKobo)),
+    revenueByCategory: Array.from(byCategory.entries()).map(([category, amountKobo]) => ({ category, amountKobo })),
     occupancyTrend: trend.map(t => ({ date: t.date, occupancy: t.occupancy })),
     revenueTrend: trend.map(t => ({ date: t.date, revenue: t.revenue })),
     roomStatus: roomStatusBreakdown(branchRooms),

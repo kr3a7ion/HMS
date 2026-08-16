@@ -14,9 +14,10 @@ import { db } from "../db/client.js";
 import {
   reservations, guests, rooms, folioCharges, users, workOrders, restaurantOrders,
   restaurantOrderItems, inspections, products, stockTransactions, purchaseOrders,
-  purchaseOrderItems, suppliers, attendance, shifts,
+  purchaseOrderItems, suppliers, attendance, shifts, payments,
 } from "../db/schema.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../auth/middleware.js";
+import { addKobo, valueKobo } from "../lib/money.js";
 
 const router = Router();
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -74,16 +75,16 @@ router.get("/occupancy", requireAuth, requirePermission("reports:occupancy"), (r
   const checkedOut = rangeCreated.filter(r => r.status === "checked_out");
   const alos = checkedOut.length > 0 ? checkedOut.reduce((s, r) => s + nightsBetween(r.checkInDate, r.checkOutDate), 0) / checkedOut.length : 0;
 
-  const roomRevenue = db.select().from(folioCharges).where(and(eq(folioCharges.category, "Room"), gte(folioCharges.postedAt, start), lte(folioCharges.postedAt, end))).all()
+  const roomRevenueKobo = db.select().from(folioCharges).where(and(eq(folioCharges.category, "Room"), gte(folioCharges.postedAt, start), lte(folioCharges.postedAt, end))).all()
     .filter(c => stayed.some(r => r.id === c.reservationId))
-    .reduce((s, c) => s + c.amount, 0);
+    .reduce((s, c) => addKobo(s, c.amountKobo), 0);
   const roomNightsSold = stayed.reduce((s, r) => {
     const overlapStart = r.checkInDate > start ? r.checkInDate : start;
     const overlapEnd = r.checkOutDate < end ? r.checkOutDate : end;
     return s + nightsBetween(overlapStart, overlapEnd);
   }, 0);
-  const adr = roomNightsSold > 0 ? roomRevenue / roomNightsSold : 0;
-  const revpar = branchRooms.length > 0 ? roomRevenue / (branchRooms.length * totalRangeDays) : 0;
+  const adr = roomNightsSold > 0 ? roomRevenueKobo / roomNightsSold : 0;
+  const revpar = branchRooms.length > 0 ? roomRevenueKobo / (branchRooms.length * totalRangeDays) : 0;
 
   res.json({
     start: startStr, end: endStr,
@@ -112,19 +113,19 @@ router.get("/revenue", requireAuth, requirePermission("reports:revenue"), (req: 
   const byCategory = new Map<string, number>();
   for (const c of charges) {
     const day = c.postedAt.toISOString().slice(0, 10);
-    byDay.set(day, (byDay.get(day) ?? 0) + c.amount);
-    byCategory.set(c.category, (byCategory.get(c.category) ?? 0) + c.amount);
+    byDay.set(day, addKobo(byDay.get(day) ?? 0, c.amountKobo));
+    byCategory.set(c.category, addKobo(byCategory.get(c.category) ?? 0, c.amountKobo));
   }
-  const totalRevenue = charges.reduce((s, c) => s + c.amount, 0);
+  const totalRevenueKobo = charges.reduce((s, c) => addKobo(s, c.amountKobo), 0);
 
   const rangeDays = nightsBetween(start, end) || 1;
   const prevStart = new Date(start.getTime() - rangeDays * DAY_MS);
   const prevEnd = new Date(start.getTime() - 1);
   const prevRevenue = db.select().from(folioCharges).where(and(gte(folioCharges.postedAt, prevStart), lte(folioCharges.postedAt, prevEnd))).all()
-    .filter(c => branchResIds.has(c.reservationId)).reduce((s, c) => s + c.amount, 0);
+    .filter(c => branchResIds.has(c.reservationId)).reduce((s, c) => addKobo(s, c.amountKobo), 0);
 
   const branchRooms = db.select().from(rooms).where(eq(rooms.branchId, branchId)).all();
-  const roomRevenue = charges.filter(c => c.category === "Room").reduce((s, c) => s + c.amount, 0);
+  const roomRevenueKobo = charges.filter(c => c.category === "Room").reduce((s, c) => addKobo(s, c.amountKobo), 0);
   const stayed = db.select().from(reservations).where(and(eq(reservations.branchId, branchId), lte(reservations.checkInDate, end), gte(reservations.checkOutDate, start))).all()
     .filter(r => r.status === "checked_in" || r.status === "checked_out");
   const roomNightsSold = stayed.reduce((s, r) => {
@@ -134,12 +135,12 @@ router.get("/revenue", requireAuth, requirePermission("reports:revenue"), (req: 
   }, 0);
 
   res.json({
-    start: startStr, end: endStr, totalRevenue,
-    changeVsPreviousPeriod: prevRevenue > 0 ? Math.round(((totalRevenue - prevRevenue) / prevRevenue) * 1000) / 10 : null,
+    start: startStr, end: endStr, totalRevenueKobo,
+    changeVsPreviousPeriod: prevRevenue > 0 ? Math.round(((totalRevenueKobo - prevRevenue) / prevRevenue) * 1000) / 10 : null,
     revenueByDay: Array.from(byDay.entries()).map(([date, amount]) => ({ date, amount })).sort((a, b) => a.date.localeCompare(b.date)),
     revenueByCategory: Array.from(byCategory.entries()).map(([category, amount]) => ({ category, amount })),
-    adr: roomNightsSold > 0 ? Math.round(roomRevenue / roomNightsSold) : 0,
-    revpar: branchRooms.length > 0 ? Math.round(roomRevenue / (branchRooms.length * rangeDays)) : 0,
+    adr: roomNightsSold > 0 ? Math.round(roomRevenueKobo / roomNightsSold) : 0,
+    revpar: branchRooms.length > 0 ? Math.round(roomRevenueKobo / (branchRooms.length * rangeDays)) : 0,
   });
 });
 
@@ -189,17 +190,17 @@ router.get("/department", requireAuth, (req: AuthedRequest, res) => {
   }
   if (dept === "RT") {
     const closedOrders = db.select().from(restaurantOrders).where(and(eq(restaurantOrders.branchId, branchId), eq(restaurantOrders.status, "closed"), gte(restaurantOrders.closedAt, start), lte(restaurantOrders.closedAt, end))).all();
-    let totalCheckValue = 0;
+    let totalCheckValueKobo = 0;
     const itemCounts = new Map<string, number>();
     for (const o of closedOrders) {
       const items = db.select().from(restaurantOrderItems).where(eq(restaurantOrderItems.orderId, o.id)).all();
-      totalCheckValue += items.reduce((s, i) => s + i.quantity * i.unitPrice, 0);
+      totalCheckValueKobo = addKobo(totalCheckValueKobo, ...items.map(i => valueKobo(i.unitPriceKobo, i.quantity)));
       for (const i of items) itemCounts.set(i.name, (itemCounts.get(i.name) ?? 0) + i.quantity);
     }
     const popularItems = Array.from(itemCounts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, quantity]) => ({ name, quantity }));
     return res.json({ department: "RT", start: startStr, end: endStr, metrics: {
       ordersClosed: closedOrders.length,
-      avgCheckSize: closedOrders.length > 0 ? Math.round(totalCheckValue / closedOrders.length) : 0,
+      avgCheckSize: closedOrders.length > 0 ? Math.round(totalCheckValueKobo / closedOrders.length) : 0,
       popularItems,
     } });
   }
@@ -207,7 +208,7 @@ router.get("/department", requireAuth, (req: AuthedRequest, res) => {
   // Branch-wide summary (no dept, or a dept without its own breakdown yet).
   const revenue = db.select().from(folioCharges).where(and(gte(folioCharges.postedAt, start), lte(folioCharges.postedAt, end))).all()
     .filter(c => db.select().from(reservations).where(eq(reservations.id, c.reservationId)).get()?.branchId === branchId)
-    .reduce((s, c) => s + c.amount, 0);
+    .reduce((s, c) => addKobo(s, c.amountKobo), 0);
   const branchRooms = db.select().from(rooms).where(eq(rooms.branchId, branchId)).all();
   const inHouse = db.select().from(reservations).where(and(eq(reservations.branchId, branchId), eq(reservations.status, "checked_in"))).all().length;
   const openOrders = db.select().from(workOrders).where(and(eq(workOrders.branchId, branchId))).all().filter(w => w.status !== "completed").length;
@@ -295,7 +296,7 @@ router.get("/inventory", requireAuth, requirePermission("reports:inventory"), (r
   const { start, end, startStr, endStr } = parseRange(req);
 
   const items = db.select().from(products).where(eq(products.branchId, branchId)).all();
-  const totalStockValue = items.reduce((s, p) => s + p.currentStock * p.unitCost, 0);
+  const totalStockValueKobo = addKobo(...items.map(p => valueKobo(p.unitCostKobo, p.currentStock)));
   const critical = items.filter(p => p.currentStock <= p.reorderThreshold).length;
   const low = items.filter(p => p.currentStock > p.reorderThreshold && p.currentStock <= p.parLevel).length;
 
@@ -314,22 +315,22 @@ router.get("/inventory", requireAuth, requirePermission("reports:inventory"), (r
   for (const t of consumption) {
     const product = productMap.get(t.productId);
     if (!product) continue;
-    const value = Math.abs(t.quantity) * product.unitCost;
-    consumptionByCategory.set(product.category, (consumptionByCategory.get(product.category) ?? 0) + value);
+    const valueKoboAmount = valueKobo(product.unitCostKobo, Math.abs(t.quantity));
+    consumptionByCategory.set(product.category, addKobo(consumptionByCategory.get(product.category) ?? 0, valueKoboAmount));
   }
 
   const receivedPOs = db.select().from(purchaseOrders).where(and(eq(purchaseOrders.branchId, branchId), eq(purchaseOrders.status, "received"), gte(purchaseOrders.receivedAt, start), lte(purchaseOrders.receivedAt, end))).all();
   const supplierSpend = new Map<string, number>();
   for (const po of receivedPOs) {
     const poItems = db.select().from(purchaseOrderItems).where(eq(purchaseOrderItems.purchaseOrderId, po.id)).all();
-    const value = poItems.reduce((s, i) => s + i.quantity * i.unitCost, 0);
+    const value = addKobo(...poItems.map(i => valueKobo(i.unitCostKobo, i.quantity)));
     const supplier = db.select().from(suppliers).where(eq(suppliers.id, po.supplierId)).get();
     const key = supplier?.name ?? "Unknown";
     supplierSpend.set(key, (supplierSpend.get(key) ?? 0) + value);
   }
 
   res.json({
-    start: startStr, end: endStr, totalStockValue, criticalItems: critical, lowStockItems: low,
+    start: startStr, end: endStr, totalStockValueKobo, criticalItems: critical, lowStockItems: low,
     supplierSpend: Array.from(supplierSpend.entries()).map(([supplier, amount]) => ({ supplier, amount })),
     totalSupplierSpend: Array.from(supplierSpend.values()).reduce((a, b) => a + b, 0),
     consumptionByCategory: Array.from(consumptionByCategory.entries()).map(([category, value]) => ({ category, value })),
@@ -395,6 +396,86 @@ router.get("/staff", requireAuth, requirePermission("reports:staff"), (req: Auth
     overallAttendanceRate: overallAttendance,
     attendanceByDepartment: Array.from(attendanceByDept.entries()).map(([department, v]) => ({ department, rate: Math.round((v.present / v.total) * 1000) / 10 })),
     unstaffedShiftSlots: unstaffedSlots,
+  });
+});
+
+// ─── Reversal report (Backend Blueprint B4) ─────────────────────────────
+//
+// Lives here rather than beside the void logic in folios.ts because every
+// other report does, and because the OpenAPI generator maps one router per
+// route file -- mounting a second router from folios.ts emitted every folio
+// path twice, once under /reports.
+//
+// Grouped by operator because that is what makes it a fraud-detection view
+// rather than a curiosity: one person voiding far more than their
+// colleagues is the signal, and it is invisible in a flat chronological
+// list.
+
+router.get("/reversals", requireAuth, requirePermission("finance:reports"), (req: AuthedRequest, res) => {
+  const branchId = req.auth!.branchId;
+  const from = typeof req.query.from === "string" ? new Date(req.query.from) : null;
+  const to = typeof req.query.to === "string" ? new Date(req.query.to) : null;
+  const operator = typeof req.query.operator === "string" ? req.query.operator : null;
+
+  // Scope to this branch via the reservation, since folio lines carry no
+  // branch of their own (invariant 6 -- never trust a client branch id).
+  const branchReservationIds = new Set(
+    db.select({ id: reservations.id }).from(reservations).where(eq(reservations.branchId, branchId)).all().map(r => r.id),
+  );
+
+  const chargeReversals = db.select().from(folioCharges).where(eq(folioCharges.isReversal, true)).all()
+    .filter(c => branchReservationIds.has(c.reservationId));
+  const paymentReversals = db.select().from(payments).where(eq(payments.isReversal, true)).all()
+    .filter(p => branchReservationIds.has(p.reservationId));
+
+  const staff = new Map(
+    db.select({ id: users.id, firstName: users.firstName, lastName: users.lastName })
+      .from(users).where(eq(users.branchId, branchId)).all()
+      .map(u => [u.id, `${u.firstName} ${u.lastName}`]),
+  );
+
+  type Row = {
+    kind: "charge" | "payment"; id: string; reversalOfId: string | null; reservationId: string;
+    amountKobo: number; at: Date; operatorId: string; operatorName: string;
+    reasonCode: string | null; reasonNote: string | null;
+  };
+  let rows: Row[] = [
+    ...chargeReversals.map(c => ({
+      kind: "charge" as const, id: c.id, reversalOfId: c.reversalOfId, reservationId: c.reservationId,
+      amountKobo: c.amountKobo, at: c.postedAt, operatorId: c.postedBy,
+      operatorName: staff.get(c.postedBy) ?? "—",
+      reasonCode: c.voidReasonCode, reasonNote: c.voidReasonNote,
+    })),
+    ...paymentReversals.map(p => ({
+      kind: "payment" as const, id: p.id, reversalOfId: p.reversalOfId, reservationId: p.reservationId,
+      amountKobo: p.amountKobo, at: p.receivedAt, operatorId: p.receivedBy,
+      operatorName: staff.get(p.receivedBy) ?? "—",
+      reasonCode: p.voidReasonCode, reasonNote: p.voidReasonNote,
+    })),
+  ];
+
+  if (from && !Number.isNaN(from.getTime())) rows = rows.filter(r => r.at >= from);
+  if (to && !Number.isNaN(to.getTime())) rows = rows.filter(r => r.at <= to);
+  if (operator) rows = rows.filter(r => r.operatorId === operator);
+  rows.sort((a, b) => b.at.getTime() - a.at.getTime());
+
+  // The headline: who is reversing, how often, and for how much.
+  const byOperator = new Map<string, { operatorId: string; operatorName: string; count: number; totalKobo: number; byReason: Record<string, number> }>();
+  for (const r of rows) {
+    const entry = byOperator.get(r.operatorId)
+      ?? { operatorId: r.operatorId, operatorName: r.operatorName, count: 0, totalKobo: 0, byReason: {} };
+    entry.count += 1;
+    entry.totalKobo += Math.abs(r.amountKobo);
+    const reason = r.reasonCode ?? "unspecified";
+    entry.byReason[reason] = (entry.byReason[reason] ?? 0) + 1;
+    byOperator.set(r.operatorId, entry);
+  }
+
+  res.json({
+    totalReversals: rows.length,
+    totalReversedKobo: rows.reduce((sum, r) => sum + Math.abs(r.amountKobo), 0),
+    byOperator: Array.from(byOperator.values()).sort((a, b) => b.totalKobo - a.totalKobo),
+    reversals: rows,
   });
 });
 

@@ -11,7 +11,7 @@
 // TTLock and queues on real network failure" path is a genuine gap --
 // exercising it would mean a real outbound call to api.sciener.com, which
 // isn't deterministic enough for an automated suite. Documented, not faked.
-import { test, before, after } from "node:test";
+import { test, beforeAll as before, afterAll as after } from "vitest";
 import assert from "node:assert/strict";
 import http from "node:http";
 import os from "node:os";
@@ -55,7 +55,7 @@ async function createReservation(roomId: string | null) {
   db.insert(reservations).values({
     id, branchId, guestId, roomId, status: "confirmed",
     checkInDate: new Date("2026-02-01"), checkOutDate: new Date("2026-02-03"),
-    rate: 40000, createdBy: fdUserId, createdAt: new Date(),
+    rateKobo: 4000000, createdBy: fdUserId, createdAt: new Date(),
   }).run();
   return id;
 }
@@ -75,7 +75,7 @@ before(async () => {
   orgId = nanoid();
   branchId = nanoid();
   db.insert(organizations).values({ id: orgId, name: "Test Org", createdAt: new Date() }).run();
-  db.insert(branches).values({ id: branchId, organizationId: orgId, name: "Test Branch", createdAt: new Date() }).run();
+  db.insert(branches).values({ id: branchId, organizationId: orgId, name: "Test Branch", createdAt: new Date(), currentBusinessDate: new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate())) }).run();
 
   const fdId = nanoid();
   fdUserId = fdId;

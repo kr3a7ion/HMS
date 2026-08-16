@@ -22,6 +22,8 @@ import { requireAuth, requirePermission, type AuthedRequest } from "../auth/midd
 import { hashPassword } from "../auth/passwords.js";
 import { roleExists } from "../auth/permissions.js";
 import { logAudit } from "../services/audit.js";
+import { clearAllForAccount } from "../lib/loginThrottle.js";
+import { hashIdentifier } from "../lib/redact.js";
 import { getErrorLog } from "../services/errorLog.js";
 
 const router = Router();
@@ -291,6 +293,38 @@ router.get("/audit-log", requireAuth, requirePermission("admin:operations"), (re
     .from(auditLog).leftJoin(users, eq(auditLog.userId, users.id))
     .where(and(...conditions)).orderBy(desc(auditLog.createdAt)).limit(500).all();
   res.json(rows);
+});
+
+// Backend Blueprint B17.4 — the IT unlock.
+//
+// Backoff never locks an account permanently, so this is not the emergency
+// valve the old hard lockout needed. It exists for the case backoff still
+// produces: someone repeatedly fat-fingers their password, walks away for
+// five minutes of accumulated delay, and needs to be on the desk NOW.
+//
+// Clearing is by ACCOUNT across every address, because the person at the desk
+// does not know which IP their attempts came from, and the schedule is keyed
+// on the pair.
+router.post("/users/:id/unlock", requireAuth, requirePermission("admin:manage"), (req: AuthedRequest, res) => {
+  const target = db.select().from(users).where(and(
+    eq(users.id, req.params.id),
+    eq(users.branchId, req.auth!.branchId),
+  )).get();
+  if (!target) return res.status(404).json({ error: "NOT_FOUND" });
+
+  const cleared = clearAllForAccount(target.email);
+  db.update(users).set({ failedLoginAttempts: 0, lockedUntil: null }).where(eq(users.id, target.id)).run();
+
+  logAudit({
+    userId: req.auth!.userId, branchId: req.auth!.branchId, action: "login_throttle_cleared",
+    module: "IT Admin", recordId: target.id,
+    // The account is named by its hash, consistent with B17.6 -- an audit row
+    // about a login problem should not itself store the login.
+    details: `Login backoff cleared for ${hashIdentifier(target.email)} (${cleared} address schedule(s))`,
+    ipAddress: req.ip,
+  });
+
+  res.json({ userId: target.id, schedulesCleared: cleared });
 });
 
 export default router;

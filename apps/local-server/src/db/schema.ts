@@ -4,7 +4,7 @@
 // key_card_events) and every other module lands in Phase 2+ as each module
 // is wired to real data. Don't add tables here ahead of the module that
 // needs them — see guidelines/Guidelines.md.
-import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const organizations = sqliteTable("organizations", {
   id: text("id").primaryKey(),
@@ -27,16 +27,30 @@ export const branches = sqliteTable("branches", {
   checkOutTime: text("check_out_time").notNull().default("11:00"),
   currency: text("currency").notNull().default("NGN"),
   timezone: text("timezone").notNull().default("Africa/Lagos"),
+  // B6 NOTE: these three are no longer the authority on tax -- tax_codes is.
+  // They are kept because the Settings > Hotel Configuration screen edits
+  // them, and settings.ts now writes them THROUGH to this branch's legacy
+  // VAT code so the two can never disagree. Multi-jurisdiction setups
+  // (consumption tax, service charge) live only in tax_codes; this pair can
+  // only ever express the single federal VAT.
   taxName: text("tax_name").notNull().default("VAT"),
-  taxRate: real("tax_rate").notNull().default(7.5),
+  // Basis points, not a percentage: 7.5% is 750. See lib/money.ts (B2).
+  taxRateBp: integer("tax_rate_bp").notNull().default(750),
   taxInclusive: integer("tax_inclusive", { mode: "boolean" }).notNull().default(false),
   rateRounding: integer("rate_rounding").notNull().default(0), // round rates to nearest N naira; 0 = off
-  discountApprovalThreshold: real("discount_approval_threshold").notNull().default(0),
+  discountApprovalThresholdKobo: integer("discount_approval_threshold_kobo").notNull().default(0),
   // JSON array of module keys ("restaurant"|"inventory"|"multiBranch"|"doorLock").
   // Drives sidebar visibility for those four optional modules -- see the NAV
   // filtering in App.tsx. Core modules (Reservations, Front Desk, HK, MX)
   // aren't toggleable, matching the Blueprint's "required" modules.
   enabledModulesJson: text("enabled_modules_json").notNull().default('["restaurant","inventory","multiBranch","doorLock"]'),
+  // Backend Blueprint B5 / invariant 9. The trading day, which is NOT the
+  // calendar day: it only advances when the night audit rolls it. Every
+  // financial row is stamped with this, so a charge posted at 01:30 belongs
+  // to the previous trading day.
+  currentBusinessDate: integer("current_business_date", { mode: "timestamp" }).notNull(),
+  businessDateRollHour: integer("business_date_roll_hour").notNull().default(3),
+  lastAuditRunId: text("last_audit_run_id"),
 });
 
 // Role codes match Blueprint Part 2.4 exactly: PLT ORG MGT FD RSV HK MX RT RO CS FIN IT
@@ -63,7 +77,7 @@ export const users = sqliteTable("users", {
   emergencyContactName: text("emergency_contact_name"),
   emergencyContactPhone: text("emergency_contact_phone"),
   startDate: integer("start_date", { mode: "timestamp" }),
-  payRate: real("pay_rate"), // monthly base, NGN -- HR-06 Payroll Summary
+  payRateKobo: integer("pay_rate_kobo"), // monthly base in kobo -- HR-06 Payroll Summary
   contractType: text("contract_type"), // "Full-time" | "Part-time" | "Contract" -- free text, HR sets it
 });
 
@@ -105,11 +119,107 @@ export const activeSessions = sqliteTable("active_sessions", {
   revokeReason: text("revoke_reason"),
 });
 
+// Backend Blueprint B8 — what a room IS, as opposed to what it is called.
+//
+// rooms.type was free text ("Standard", "Deluxe"). That column stays because
+// the housekeeping and front-desk screens display it, but a type is now a row
+// that can carry a rate, an occupancy limit and amenities -- which is what
+// makes "what does a Deluxe cost on the 14th?" answerable without asking
+// someone.
+export const roomTypes = sqliteTable("room_types", {
+  id: text("id").primaryKey(),
+  branchId: text("branch_id").notNull().references(() => branches.id),
+  code: text("code").notNull(),
+  name: text("name").notNull(),
+  description: text("description"),
+  maxOccupancy: integer("max_occupancy").notNull().default(2),
+  bedConfiguration: text("bed_configuration"),
+  sizeSqm: integer("size_sqm"),
+  amenitiesJson: text("amenities_json").notNull().default("[]"),
+  /** Last-resort rate when no calendar row and no derivation applies. */
+  baseRateKobo: integer("base_rate_kobo").notNull().default(0),
+  displayOrder: integer("display_order").notNull().default(0),
+  isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+}, (t) => ({
+  branchCode: uniqueIndex("room_types_branch_id_code_unique").on(t.branchId, t.code),
+}));
+
+// A DERIVED plan stores no rates. "Corporate = BAR less 15%" is one row,
+// computed at read time. Duplicating rows instead would leave every derived
+// plan on yesterday's price the moment the base rate moved -- the classic
+// revenue-management bug, and one nobody notices until a corporate client
+// queries an invoice.
+export const ratePlans = sqliteTable("rate_plans", {
+  id: text("id").primaryKey(),
+  branchId: text("branch_id").notNull().references(() => branches.id),
+  code: text("code").notNull(),
+  name: text("name").notNull(),
+  planType: text("plan_type").notNull().default("base"), // base|derived|corporate|ota|package
+  derivedFromId: text("derived_from_id"),
+  derivationType: text("derivation_type"),               // percentage|fixed_offset
+  /** Basis points for `percentage`; kobo for `fixed_offset`. Signed. */
+  derivationValueBp: integer("derivation_value_bp"),
+  cancellationPolicyId: text("cancellation_policy_id"),  // B9
+  minStay: integer("min_stay"),
+  maxStay: integer("max_stay"),
+  advanceDaysMin: integer("advance_days_min"),
+  advanceDaysMax: integer("advance_days_max"),
+  includesBreakfast: integer("includes_breakfast", { mode: "boolean" }).notNull().default(false),
+  isRefundable: integer("is_refundable", { mode: "boolean" }).notNull().default(true),
+  effectiveFrom: integer("effective_from", { mode: "timestamp" }).notNull(),
+  effectiveTo: integer("effective_to", { mode: "timestamp" }),
+  isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+}, (t) => ({
+  branchCode: uniqueIndex("rate_plans_branch_id_code_unique").on(t.branchId, t.code),
+}));
+
+// One row per plan per type per night, and ONLY where a rate was actually
+// set. Absence means "fall through to the derivation or the type's base
+// rate" -- it never means free.
+export const rateCalendar = sqliteTable("rate_calendar", {
+  id: text("id").primaryKey(),
+  branchId: text("branch_id").notNull().references(() => branches.id),
+  ratePlanId: text("rate_plan_id").notNull().references(() => ratePlans.id),
+  roomTypeId: text("room_type_id").notNull().references(() => roomTypes.id),
+  stayDate: integer("stay_date", { mode: "timestamp" }).notNull(),
+  rateKobo: integer("rate_kobo").notNull(),
+  minStay: integer("min_stay"),
+  closedToArrival: integer("closed_to_arrival", { mode: "boolean" }).notNull().default(false),
+  closedToDeparture: integer("closed_to_departure", { mode: "boolean" }).notNull().default(false),
+  stopSell: integer("stop_sell", { mode: "boolean" }).notNull().default(false),
+  updatedAt: integer("updated_at", { mode: "timestamp" }),
+}, (t) => ({
+  planTypeDate: uniqueIndex("rate_calendar_plan_type_date_unique").on(t.ratePlanId, t.roomTypeId, t.stayDate),
+}));
+
+// THE ANSWER TO "IS ANYTHING FREE?". `sold` is incremented in the same
+// transaction as the reservation insert, so the count and the bookings cannot
+// disagree -- which is exactly what a nightly recount job would be papering
+// over. Availability is never computed by scanning reservations.
+export const inventoryCalendar = sqliteTable("inventory_calendar", {
+  id: text("id").primaryKey(),
+  branchId: text("branch_id").notNull().references(() => branches.id),
+  roomTypeId: text("room_type_id").notNull().references(() => roomTypes.id),
+  stayDate: integer("stay_date", { mode: "timestamp" }).notNull(),
+  totalRooms: integer("total_rooms").notNull().default(0),
+  sold: integer("sold").notNull().default(0),
+  blocked: integer("blocked").notNull().default(0),
+  outOfOrder: integer("out_of_order").notNull().default(0),
+  /** Controlled oversell allowance. Selling past total_rooms needs this. */
+  overbookingLimit: integer("overbooking_limit").notNull().default(0),
+}, (t) => ({
+  typeDate: uniqueIndex("inventory_calendar_room_type_id_stay_date_unique").on(t.roomTypeId, t.stayDate),
+}));
+
 export const rooms = sqliteTable("rooms", {
   id: text("id").primaryKey(),
   branchId: text("branch_id").notNull().references(() => branches.id),
   number: text("number").notNull(),
   type: text("type").notNull(),
+  /** Backend Blueprint B8. Backfilled from `type` by migration 0008. */
+  roomTypeId: text("room_type_id").references(() => roomTypes.id),
   floor: text("floor"),
   status: text("status").notNull().default("available"), // available|reserved|occupied|cleaning|maintenance|out_of_service
   // Housekeeping (HK-01) fields -- deliberately a separate axis from
@@ -144,10 +254,15 @@ export const reservations = sqliteTable("reservations", {
   branchId: text("branch_id").notNull().references(() => branches.id),
   guestId: text("guest_id").notNull().references(() => guests.id),
   roomId: text("room_id").references(() => rooms.id),
+  // Backend Blueprint B8. Booking a TYPE is the normal case -- the guest
+  // wants a Deluxe, and which Deluxe is decided at check-in. roomId stays
+  // nullable until that assignment.
+  roomTypeId: text("room_type_id").references(() => roomTypes.id),
+  ratePlanId: text("rate_plan_id"),
   checkInDate: integer("check_in_date", { mode: "timestamp" }).notNull(),
   checkOutDate: integer("check_out_date", { mode: "timestamp" }).notNull(),
   status: text("status").notNull().default("confirmed"), // confirmed|pending|checked_in|checked_out|cancelled|no_show
-  rate: real("rate").notNull(),
+  rateKobo: integer("rate_kobo").notNull(),
   adults: integer("adults").notNull().default(1),
   children: integer("children").notNull().default(0),
   specialRequests: text("special_requests"),
@@ -157,7 +272,34 @@ export const reservations = sqliteTable("reservations", {
   // folio for review -- independent of checked_in/checked_out, which
   // already covers "open" (in-house) vs "closed" (settled at checkout).
   disputed: integer("disputed", { mode: "boolean" }).notNull().default(false),
+  // Backend Blueprint B9 — the cancellation record. `penaltyWaived` is its
+  // own flag rather than "penaltyChargeId IS NULL": a waived penalty and a
+  // zero penalty are different events, and only one needs a name attached.
+  cancellationPolicyId: text("cancellation_policy_id"),
+  cancelledAt: integer("cancelled_at", { mode: "timestamp" }),
+  cancelledBy: text("cancelled_by").references(() => users.id),
+  cancellationReason: text("cancellation_reason"),
+  penaltyChargeId: text("penalty_charge_id"),
+  penaltyWaived: integer("penalty_waived", { mode: "boolean" }).notNull().default(false),
+  penaltyWaivedBy: text("penalty_waived_by").references(() => users.id),
+  penaltyWaiverReason: text("penalty_waiver_reason"),
 });
+
+// Backend Blueprint B3. One row per room per night. The UNIQUE
+// (room_id, stay_date) index is the real double-booking guard -- the
+// overlap check in routes/reservations.ts only exists to produce a friendlier
+// error a moment earlier. stayDate is midnight UTC of the night occupied;
+// check-out day is not a night, so same-day turnovers are legal.
+export const roomNightInventory = sqliteTable("room_night_inventory", {
+  id: text("id").primaryKey(),
+  branchId: text("branch_id").notNull().references(() => branches.id),
+  roomId: text("room_id").notNull().references(() => rooms.id),
+  stayDate: integer("stay_date", { mode: "timestamp" }).notNull(),
+  reservationId: text("reservation_id").notNull().references(() => reservations.id),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+}, (t) => ({
+  roomNight: uniqueIndex("room_night_inventory_room_id_stay_date_unique").on(t.roomId, t.stayDate),
+}));
 
 export const folioCharges = sqliteTable("folio_charges", {
   id: text("id").primaryKey(),
@@ -165,19 +307,438 @@ export const folioCharges = sqliteTable("folio_charges", {
   category: text("category").notNull(),
   description: text("description").notNull(),
   quantity: integer("quantity").notNull().default(1),
-  unitPrice: real("unit_price").notNull(),
-  amount: real("amount").notNull(),
+  unitPriceKobo: integer("unit_price_kobo").notNull(),
+  amountKobo: integer("amount_kobo").notNull(),
   postedBy: text("posted_by").notNull().references(() => users.id),
   postedAt: integer("posted_at", { mode: "timestamp" }).notNull(),
+  // Backend Blueprint B4 / invariant 4 -- append-only ledger. A posted line
+  // is never updated or deleted; a correction is a new negative row with
+  // is_reversal = 1 and reversal_of_id pointing at the original. SQLite
+  // triggers (migration 0004) enforce this even against a direct SQL edit.
+  reversalOfId: text("reversal_of_id"),
+  isReversal: integer("is_reversal", { mode: "boolean" }).notNull().default(false),
+  // Running total of how much of this line has been reversed. voidedAt is
+  // set only once it is reversed in FULL -- a partial void leaves the line
+  // live so the remainder still stands, and so further partial voids are
+  // still possible (the trigger locks a row the moment voidedAt is set).
+  reversedAmountKobo: integer("reversed_amount_kobo").notNull().default(0),
+  voidedAt: integer("voided_at", { mode: "timestamp" }),
+  voidedBy: text("voided_by").references(() => users.id),
+  voidReasonCode: text("void_reason_code"),
+  voidReasonNote: text("void_reason_note"),
+  // Invariant 9. B5 replaces this with the branch's real rolling business
+  // date; until then it is the UTC calendar date of posting.
+  businessDate: integer("business_date", { mode: "timestamp" }).notNull(),
+  // Backend Blueprint B6 -- line parentage. A taxed charge is a `base` row
+  // plus one `tax`/`service_charge` child per applicable code, each pointing
+  // back at the parent. Tax is never folded into the base amount: the guest
+  // needs the breakdown on the folio and the auditor needs it per
+  // jurisdiction, and neither is recoverable from a single blended number.
+  parentChargeId: text("parent_charge_id"),
+  chargeKind: text("charge_kind").notNull().default("base"), // base|tax|service_charge
+  taxCodeId: text("tax_code_id"),
+});
+
+// Backend Blueprint B6. Effective-dating is the point of the table: when VAT
+// moves from 7.5% to 10%, that is a NEW row, not an edit. Editing in place
+// would make reprinting last month's invoice produce a different number than
+// the guest actually paid.
+export const taxCodes = sqliteTable("tax_codes", {
+  id: text("id").primaryKey(),
+  branchId: text("branch_id").notNull().references(() => branches.id),
+  code: text("code").notNull(),
+  name: text("name").notNull(),
+  jurisdiction: text("jurisdiction").notNull(),   // federal|state|local
+  taxType: text("tax_type").notNull(),            // vat|consumption|service_charge|other
+  rateBp: integer("rate_bp").notNull(),
+  isInclusive: integer("is_inclusive", { mode: "boolean" }).notNull().default(false),
+  /** JSON array of tax_code ids whose amounts join this one's base. */
+  compoundsOnJson: text("compounds_on_json").notNull().default("[]"),
+  /** JSON array of charge categories; empty means every category. */
+  appliesToJson: text("applies_to_json").notNull().default("[]"),
+  computationOrder: integer("computation_order").notNull().default(100),
+  effectiveFrom: integer("effective_from", { mode: "timestamp" }).notNull(),
+  effectiveTo: integer("effective_to", { mode: "timestamp" }),
+  isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }),
+});
+
+// An exemption names the ONE code it suppresses. A blanket "this guest pays
+// no tax" is almost always wrong -- a diplomatic exemption covers VAT but
+// not a service charge, and a long-stay exemption covers consumption tax but
+// not VAT.
+export const taxExemptions = sqliteTable("tax_exemptions", {
+  id: text("id").primaryKey(),
+  branchId: text("branch_id").notNull().references(() => branches.id),
+  taxCodeId: text("tax_code_id").notNull().references(() => taxCodes.id),
+  exemptionType: text("exemption_type").notNull(), // guest_type|corporate_account|long_stay|diplomatic
+  criteriaJson: text("criteria_json").notNull().default("{}"),
+  requiresEvidence: integer("requires_evidence", { mode: "boolean" }).notNull().default(true),
+  isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+});
+
+// Backend Blueprint B7 — gapless per-branch document numbering.
+//
+// next_number is bumped in the SAME transaction as the document that
+// consumes it, which is the entire mechanism: if the document does not
+// commit, the number is not spent. See services/documents/sequence.ts.
+export const documentSequences = sqliteTable("document_sequences", {
+  id: text("id").primaryKey(),
+  branchId: text("branch_id").notNull().references(() => branches.id),
+  documentType: text("document_type").notNull(), // invoice|receipt|credit_note|complaint|trip|proforma
+  prefix: text("prefix").notNull(),
+  nextNumber: integer("next_number").notNull().default(1),
+  padWidth: integer("pad_width").notNull().default(5),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }),
+}, (t) => ({
+  branchType: uniqueIndex("document_sequences_branch_id_document_type_unique").on(t.branchId, t.documentType),
+}));
+
+export const invoices = sqliteTable("invoices", {
+  id: text("id").primaryKey(),
+  branchId: text("branch_id").notNull().references(() => branches.id),
+  invoiceNumber: text("invoice_number").notNull(),
+  /** The raw integer behind the formatted number, so gaps are checkable. */
+  sequenceNumber: integer("sequence_number").notNull(),
+  businessDate: integer("business_date", { mode: "timestamp" }).notNull(),
+  invoiceType: text("invoice_type").notNull(), // guest|corporate|group|proforma
+  reservationId: text("reservation_id").references(() => reservations.id),
+  guestId: text("guest_id").references(() => guests.id),
+  /** No FK: groups are B12 and corporate accounts B13. */
+  groupId: text("group_id"),
+  corporateAccountId: text("corporate_account_id"),
+  billToName: text("bill_to_name").notNull(),
+  billToAddress: text("bill_to_address"),
+  billToTin: text("bill_to_tin"),
+  issuedAt: integer("issued_at", { mode: "timestamp" }).notNull(),
+  issuedBy: text("issued_by").references(() => users.id),
+  dueAt: integer("due_at", { mode: "timestamp" }),
+  subtotalKobo: integer("subtotal_kobo").notNull().default(0),
+  taxTotalKobo: integer("tax_total_kobo").notNull().default(0),
+  totalKobo: integer("total_kobo").notNull().default(0),
+  paidKobo: integer("paid_kobo").notNull().default(0),
+  balanceKobo: integer("balance_kobo").notNull().default(0),
+  status: text("status").notNull().default("issued"),
+  voidedAt: integer("voided_at", { mode: "timestamp" }),
+  voidedBy: text("voided_by").references(() => users.id),
+  voidReason: text("void_reason"),
+  /** The FIRS e-invoicing seam. Null means "never submitted" -- honest. */
+  firsEinvoiceStatus: text("firs_einvoice_status"),
+  firsSubmissionRef: text("firs_submission_ref"),
+  pdfRef: text("pdf_ref"),
+}, (t) => ({
+  branchNumber: uniqueIndex("invoices_branch_id_invoice_number_unique").on(t.branchId, t.invoiceNumber),
+}));
+
+// A SNAPSHOT of the folio charge at issuance, never a live view. A reversal
+// posted next week must not change an invoice the guest already holds -- that
+// is what a credit note is for.
+export const invoiceLines = sqliteTable("invoice_lines", {
+  id: text("id").primaryKey(),
+  invoiceId: text("invoice_id").notNull().references(() => invoices.id),
+  folioChargeId: text("folio_charge_id").references(() => folioCharges.id),
+  description: text("description").notNull(),
+  chargeKind: text("charge_kind").notNull().default("base"),
+  quantity: integer("quantity").notNull().default(1),
+  unitPriceKobo: integer("unit_price_kobo").notNull(),
+  amountKobo: integer("amount_kobo").notNull(),
+  taxCodeId: text("tax_code_id").references(() => taxCodes.id),
+  sortOrder: integer("sort_order").notNull().default(0),
+});
+
+export const receipts = sqliteTable("receipts", {
+  id: text("id").primaryKey(),
+  branchId: text("branch_id").notNull().references(() => branches.id),
+  receiptNumber: text("receipt_number").notNull(),
+  sequenceNumber: integer("sequence_number").notNull(),
+  paymentId: text("payment_id").notNull().references(() => payments.id),
+  invoiceId: text("invoice_id").references(() => invoices.id),
+  businessDate: integer("business_date", { mode: "timestamp" }).notNull(),
+  issuedAt: integer("issued_at", { mode: "timestamp" }).notNull(),
+  issuedBy: text("issued_by").references(() => users.id),
+  amountKobo: integer("amount_kobo").notNull(),
+  method: text("method").notNull(),
+  reference: text("reference"),
+}, (t) => ({
+  branchNumber: uniqueIndex("receipts_branch_id_receipt_number_unique").on(t.branchId, t.receiptNumber),
+  onePerPayment: uniqueIndex("receipts_payment_id_unique").on(t.paymentId),
+}));
+
+export const creditNotes = sqliteTable("credit_notes", {
+  id: text("id").primaryKey(),
+  branchId: text("branch_id").notNull().references(() => branches.id),
+  creditNoteNumber: text("credit_note_number").notNull(),
+  sequenceNumber: integer("sequence_number").notNull(),
+  invoiceId: text("invoice_id").notNull().references(() => invoices.id),
+  businessDate: integer("business_date", { mode: "timestamp" }).notNull(),
+  reason: text("reason").notNull(),
+  amountKobo: integer("amount_kobo").notNull(),
+  issuedAt: integer("issued_at", { mode: "timestamp" }).notNull(),
+  issuedBy: text("issued_by").references(() => users.id),
+  approvedBy: text("approved_by").references(() => users.id),
+}, (t) => ({
+  branchNumber: uniqueIndex("credit_notes_branch_id_credit_note_number_unique").on(t.branchId, t.creditNoteNumber),
+}));
+
+// Backend Blueprint B9. The penalty is a TYPE plus a value, never a computed
+// amount frozen at booking: "first night" and "30% of the stay" both have to
+// survive a rate change between booking and cancellation.
+export const cancellationPolicies = sqliteTable("cancellation_policies", {
+  id: text("id").primaryKey(),
+  branchId: text("branch_id").notNull().references(() => branches.id),
+  code: text("code").notNull(),
+  name: text("name").notNull(),
+  description: text("description"),
+  /** Hours before arrival within which cancelling is free. */
+  freeCancellationHours: integer("free_cancellation_hours").notNull().default(24),
+  penaltyType: text("penalty_type").notNull().default("first_night"),
+  penaltyValueBp: integer("penalty_value_bp"),
+  penaltyFixedKobo: integer("penalty_fixed_kobo"),
+  noShowPenaltyType: text("no_show_penalty_type").notNull().default("first_night"),
+  noShowPenaltyValueBp: integer("no_show_penalty_value_bp"),
+  noShowPenaltyFixedKobo: integer("no_show_penalty_fixed_kobo"),
+  isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }),
+}, (t) => ({
+  branchCode: uniqueIndex("cancellation_policies_branch_id_code_unique").on(t.branchId, t.code),
+}));
+
+// A refund is a REQUEST that becomes a record, not a button that moves money.
+// Refunding is the easiest way to steal from a hotel -- it turns a guest's
+// payment into cash out of the drawer -- so request and approval are separate
+// acts, and the deductions are itemised rather than netted.
+export const refunds = sqliteTable("refunds", {
+  id: text("id").primaryKey(),
+  branchId: text("branch_id").notNull().references(() => branches.id),
+  refundNumber: text("refund_number").notNull(),
+  sequenceNumber: integer("sequence_number").notNull(),
+  businessDate: integer("business_date", { mode: "timestamp" }).notNull(),
+  paymentId: text("payment_id").references(() => payments.id),
+  reservationId: text("reservation_id").references(() => reservations.id),
+  guestId: text("guest_id").references(() => guests.id),
+  requestedAmountKobo: integer("requested_amount_kobo").notNull(),
+  approvedAmountKobo: integer("approved_amount_kobo"),
+  deductionsJson: text("deductions_json").notNull().default("[]"),
+  reason: text("reason").notNull(),
+  method: text("method").notNull(),
+  gatewayReference: text("gateway_reference"),
+  status: text("status").notNull().default("requested"),
+  requestedBy: text("requested_by").references(() => users.id),
+  requestedAt: integer("requested_at", { mode: "timestamp" }).notNull(),
+  approvedBy: text("approved_by").references(() => users.id),
+  approvedAt: integer("approved_at", { mode: "timestamp" }),
+  completedAt: integer("completed_at", { mode: "timestamp" }),
+  rejectionReason: text("rejection_reason"),
+  /** The ledger reversal. Null until money has actually left. */
+  paymentReversalId: text("payment_reversal_id"),
+}, (t) => ({
+  branchNumber: uniqueIndex("refunds_branch_id_refund_number_unique").on(t.branchId, t.refundNumber),
+}));
+
+// A DEPOSIT IS A LIABILITY, NOT REVENUE. Until the guest stays, the hotel is
+// holding someone else's money: it must not read as income, and it must be
+// refundable in full without unwinding a sale that never happened.
+//
+// The three outcomes are tracked separately because they are three different
+// journal entries: APPLIED converts the liability to settlement, REFUNDED
+// discharges it, FORFEITED converts it to revenue.
+export const deposits = sqliteTable("deposits", {
+  id: text("id").primaryKey(),
+  branchId: text("branch_id").notNull().references(() => branches.id),
+  reservationId: text("reservation_id").references(() => reservations.id),
+  guestId: text("guest_id").references(() => guests.id),
+  depositType: text("deposit_type").notNull().default("reservation"),
+  amountKobo: integer("amount_kobo").notNull(),
+  businessDate: integer("business_date", { mode: "timestamp" }).notNull(),
+  heldAt: integer("held_at", { mode: "timestamp" }).notNull(),
+  heldBy: text("held_by").references(() => users.id),
+  paymentId: text("payment_id").references(() => payments.id),
+  method: text("method").notNull().default("cash"),
+  status: text("status").notNull().default("held"),
+  appliedAmountKobo: integer("applied_amount_kobo").notNull().default(0),
+  refundedAmountKobo: integer("refunded_amount_kobo").notNull().default(0),
+  forfeitedAmountKobo: integer("forfeited_amount_kobo").notNull().default(0),
+  releasedAt: integer("released_at", { mode: "timestamp" }),
+  releasedBy: text("released_by").references(() => users.id),
+  releaseNotes: text("release_notes"),
+});
+
+// Backend Blueprint B18. One row per update attempt, written BEFORE the swap:
+// an update that bricks the container must still leave a record of what was
+// tried and how far it got.
+// Backend Blueprint B19.5. A local ring buffer, also pushed to central.
+// Kept locally as well because the moment central most wants this data is
+// when the uplink is down -- a metric that only exists once transmitted is
+// missing exactly when it matters.
+export const healthHeartbeats = sqliteTable("health_heartbeats", {
+  id: text("id").primaryKey(),
+  branchId: text("branch_id").references(() => branches.id),
+  recordedAt: integer("recorded_at", { mode: "timestamp" }).notNull(),
+  diskFreeBytes: integer("disk_free_bytes"),
+  diskTotalBytes: integer("disk_total_bytes"),
+  dbSizeBytes: integer("db_size_bytes"),
+  walSizeBytes: integer("wal_size_bytes"),
+  memoryUsedBytes: integer("memory_used_bytes"),
+  cpuPercent: real("cpu_percent"),
+  uptimeSeconds: integer("uptime_seconds"),
+  errorCount1h: integer("error_count_1h").notNull().default(0),
+  pendingSyncCount: integer("pending_sync_count").notNull().default(0),
+  pendingLockQueueCount: integer("pending_lock_queue_count").notNull().default(0),
+  schemaVersion: integer("schema_version"),
+  appDigest: text("app_digest"),
+  /** Drift matters: business date, token expiry and the ledger all depend
+   *  on this machine agreeing with reality about the time. */
+  clockOffsetSeconds: real("clock_offset_seconds"),
+  pushedAt: integer("pushed_at", { mode: "timestamp" }),
+});
+
+// ─── Backend Blueprint B23 — payments gateway ────────────────────────────
+export const paymentGateways = sqliteTable("payment_gateways", {
+  id: text("id").primaryKey(),
+  branchId: text("branch_id").notNull().references(() => branches.id),
+  provider: text("provider").notNull(),   // paystack|flutterwave|moniepoint|manual|fake
+  displayName: text("display_name").notNull(),
+  /** Encrypted JSON via lib/secrets.ts — API keys move real money. */
+  configEncrypted: text("config_encrypted"),
+  isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+  supportsTerminal: integer("supports_terminal", { mode: "boolean" }).notNull().default(false),
+  supportsOnline: integer("supports_online", { mode: "boolean" }).notNull().default(true),
+  supportsRefund: integer("supports_refund", { mode: "boolean" }).notNull().default(false),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }),
+}, (t) => ({
+  branchProvider: uniqueIndex("payment_gateways_branch_id_provider_unique").on(t.branchId, t.provider),
+}));
+
+// The gateway-side record, deliberately SEPARATE from `payments` (the folio
+// ledger row): a transaction can be initiated, fail and be retried without
+// ever producing a ledger row, and a cash payment has no transaction at all.
+export const paymentTransactions = sqliteTable("payment_transactions", {
+  id: text("id").primaryKey(),
+  branchId: text("branch_id").notNull().references(() => branches.id),
+  paymentId: text("payment_id"),
+  reservationId: text("reservation_id").references(() => reservations.id),
+  gatewayId: text("gateway_id").references(() => paymentGateways.id),
+  gatewayReference: text("gateway_reference"),
+  /** THE anti-double-charge guarantee. UNIQUE per branch. */
+  idempotencyKey: text("idempotency_key").notNull(),
+  /** The clerk who took it. A webhook has no actor, so its folio row is
+   *  attributed here rather than to an invented system user. */
+  initiatedBy: text("initiated_by").references(() => users.id),
+  amountKobo: integer("amount_kobo").notNull(),
+  currency: text("currency").notNull().default("NGN"),
+  channel: text("channel").notNull(),
+  status: text("status").notNull().default("initiated"),
+  initiatedAt: integer("initiated_at", { mode: "timestamp" }).notNull(),
+  completedAt: integer("completed_at", { mode: "timestamp" }),
+  failureReason: text("failure_reason"),
+  terminalId: text("terminal_id"),
+  rrn: text("rrn"),
+  authCode: text("auth_code"),
+  /** Only ever the masked form. A full PAN would put this property in PCI
+   *  scope it has no way to satisfy. */
+  maskedPan: text("masked_pan"),
+  cardType: text("card_type"),
+  rawResponseJson: text("raw_response_json"),
+  settlementStatus: text("settlement_status").notNull().default("unsettled"),
+  settledAt: integer("settled_at", { mode: "timestamp" }),
+  settlementReference: text("settlement_reference"),
+  feeKobo: integer("fee_kobo").notNull().default(0),
+  takenOffline: integer("taken_offline", { mode: "boolean" }).notNull().default(false),
+}, (t) => ({
+  branchKey: uniqueIndex("payment_transactions_branch_id_idempotency_key_unique").on(t.branchId, t.idempotencyKey),
+}));
+
+// What the bank says it paid, against what the property recorded. The
+// variance is the only signal a property gets that a transaction was charged
+// back, held, or silently dropped.
+export const settlementBatches = sqliteTable("settlement_batches", {
+  id: text("id").primaryKey(),
+  branchId: text("branch_id").notNull().references(() => branches.id),
+  gatewayId: text("gateway_id").references(() => paymentGateways.id),
+  batchReference: text("batch_reference").notNull(),
+  settlementDate: integer("settlement_date", { mode: "timestamp" }).notNull(),
+  grossKobo: integer("gross_kobo").notNull().default(0),
+  feeKobo: integer("fee_kobo").notNull().default(0),
+  netKobo: integer("net_kobo").notNull().default(0),
+  transactionCount: integer("transaction_count").notNull().default(0),
+  reconciledAt: integer("reconciled_at", { mode: "timestamp" }),
+  reconciledBy: text("reconciled_by").references(() => users.id),
+  varianceKobo: integer("variance_kobo").notNull().default(0),
+  varianceNotes: text("variance_notes"),
+}, (t) => ({
+  branchRef: uniqueIndex("settlement_batches_branch_id_batch_reference_unique").on(t.branchId, t.batchReference),
+}));
+
+// A gateway retries a webhook until it gets a 200 and will happily deliver
+// the same event a dozen times. This row is what makes the second delivery a
+// no-op instead of a second folio payment.
+export const paymentWebhookEvents = sqliteTable("payment_webhook_events", {
+  id: text("id").primaryKey(),
+  branchId: text("branch_id").references(() => branches.id),
+  provider: text("provider").notNull(),
+  eventId: text("event_id").notNull(),
+  eventType: text("event_type"),
+  gatewayReference: text("gateway_reference"),
+  receivedAt: integer("received_at", { mode: "timestamp" }).notNull(),
+  processedAt: integer("processed_at", { mode: "timestamp" }),
+  outcome: text("outcome"),
+  detail: text("detail"),
+}, (t) => ({
+  providerEvent: uniqueIndex("payment_webhook_events_provider_event_id_unique").on(t.provider, t.eventId),
+}));
+
+export const updateAttempts = sqliteTable("update_attempts", {
+  id: text("id").primaryKey(),
+  branchId: text("branch_id").references(() => branches.id),
+  requestedRef: text("requested_ref").notNull(),
+  resolvedDigest: text("resolved_digest"),
+  previousDigest: text("previous_digest"),
+  ring: text("ring"),
+  schemaVersion: integer("schema_version"),
+  releaseSchemaVersion: integer("release_schema_version"),
+  /** refused|swapping|health_check|succeeded|rolled_back|failed */
+  status: text("status").notNull(),
+  refusalReason: text("refusal_reason"),
+  signatureStatus: text("signature_status").notNull().default("unverified"),
+  signatureKeyId: text("signature_key_id"),
+  healthResult: text("health_result"),
+  healthDetail: text("health_detail"),
+  rolledBackTo: text("rolled_back_to"),
+  startedAt: integer("started_at", { mode: "timestamp" }).notNull(),
+  finishedAt: integer("finished_at", { mode: "timestamp" }),
+  error: text("error"),
 });
 
 export const payments = sqliteTable("payments", {
   id: text("id").primaryKey(),
   reservationId: text("reservation_id").notNull().references(() => reservations.id),
-  amount: real("amount").notNull(),
+  amountKobo: integer("amount_kobo").notNull(),
   method: text("method").notNull(), // cash|card|transfer
   receivedBy: text("received_by").notNull().references(() => users.id),
   receivedAt: integer("received_at", { mode: "timestamp" }).notNull(),
+  // Backend Blueprint B4 / invariant 4 -- append-only ledger. A posted line
+  // is never updated or deleted; a correction is a new negative row with
+  // is_reversal = 1 and reversal_of_id pointing at the original. SQLite
+  // triggers (migration 0004) enforce this even against a direct SQL edit.
+  reversalOfId: text("reversal_of_id"),
+  isReversal: integer("is_reversal", { mode: "boolean" }).notNull().default(false),
+  // Running total of how much of this line has been reversed. voidedAt is
+  // set only once it is reversed in FULL -- a partial void leaves the line
+  // live so the remainder still stands, and so further partial voids are
+  // still possible (the trigger locks a row the moment voidedAt is set).
+  reversedAmountKobo: integer("reversed_amount_kobo").notNull().default(0),
+  voidedAt: integer("voided_at", { mode: "timestamp" }),
+  voidedBy: text("voided_by").references(() => users.id),
+  voidReasonCode: text("void_reason_code"),
+  voidReasonNote: text("void_reason_note"),
+  // Invariant 9. B5 replaces this with the branch's real rolling business
+  // date; until then it is the UTC calendar date of posting.
+  businessDate: integer("business_date", { mode: "timestamp" }).notNull(),
 });
 
 // MX-01/02/03 Work Orders.
@@ -219,7 +780,7 @@ export const menuItems = sqliteTable("menu_items", {
   branchId: text("branch_id").notNull().references(() => branches.id),
   categoryId: text("category_id").notNull().references(() => menuCategories.id),
   name: text("name").notNull(),
-  price: real("price").notNull(),
+  priceKobo: integer("price_kobo").notNull(),
   available: integer("available", { mode: "boolean" }).notNull().default(true), // false == "86'd"
 });
 
@@ -248,7 +809,7 @@ export const restaurantOrders = sqliteTable("restaurant_orders", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   closedAt: integer("closed_at", { mode: "timestamp" }),
   paymentMethod: text("payment_method"), // set only when closed direct (not posted to room)
-  paidAmount: real("paid_amount"),
+  paidAmountKobo: integer("paid_amount_kobo"),
 });
 
 export const restaurantOrderItems = sqliteTable("restaurant_order_items", {
@@ -257,7 +818,7 @@ export const restaurantOrderItems = sqliteTable("restaurant_order_items", {
   menuItemId: text("menu_item_id").notNull().references(() => menuItems.id),
   name: text("name").notNull(), // denormalized at order time
   quantity: integer("quantity").notNull().default(1),
-  unitPrice: real("unit_price").notNull(),
+  unitPriceKobo: integer("unit_price_kobo").notNull(),
   status: text("status").notNull().default("pending"), // pending|ready|served
 });
 
@@ -275,7 +836,7 @@ export const products = sqliteTable("products", {
   currentStock: real("current_stock").notNull().default(0),
   parLevel: real("par_level").notNull(),
   reorderThreshold: real("reorder_threshold").notNull(),
-  unitCost: real("unit_cost").notNull(),
+  unitCostKobo: integer("unit_cost_kobo").notNull(),
   location: text("location"),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
@@ -324,7 +885,7 @@ export const purchaseOrderItems = sqliteTable("purchase_order_items", {
   purchaseOrderId: text("purchase_order_id").notNull().references(() => purchaseOrders.id),
   productId: text("product_id").notNull().references(() => products.id),
   quantity: real("quantity").notNull(),
-  unitCost: real("unit_cost").notNull(),
+  unitCostKobo: integer("unit_cost_kobo").notNull(),
 });
 
 // CO-01 Internal Chat. Department channels are fixed/seeded, open to every
@@ -512,9 +1073,22 @@ export const backupSnapshots = sqliteTable("backup_snapshots", {
   sizeBytes: integer("size_bytes").notNull(),
   type: text("type").notNull().default("local"), // local (cloud deferred)
   status: text("status").notNull().default("completed"), // completed|restore_pending|restored
-  createdBy: text("created_by").notNull().references(() => users.id),
+  // B19: nullable, because a SCHEDULED backup has no operator behind it.
+  createdBy: text("created_by").references(() => users.id),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   restoredAt: integer("restored_at", { mode: "timestamp" }),
+  // Backend Blueprint B19.1-19.4. These turn a hopeful file into a snapshot
+  // that is known to be restorable.
+  encryptionAlgorithm: text("encryption_algorithm"),
+  /** Over the PLAINTEXT snapshot, so it verifies the database not the envelope. */
+  checksumSha256: text("checksum_sha256"),
+  offsiteStatus: text("offsite_status").notNull().default("not_configured"),
+  offsiteSyncedAt: integer("offsite_synced_at", { mode: "timestamp" }),
+  retentionExpiresAt: integer("retention_expires_at", { mode: "timestamp" }),
+  backupKind: text("backup_kind").notNull().default("manual"), // scheduled|manual|pre_migration
+  restoreTestAt: integer("restore_test_at", { mode: "timestamp" }),
+  restoreTestResult: text("restore_test_result"),   // passed|failed
+  restoreTestDetail: text("restore_test_detail"),
 });
 
 // ST-03 My Preferences. One row per user, upserted on first save. Theme and
@@ -558,6 +1132,28 @@ export const syncState = sqliteTable("sync_state", {
   lastUpdateCheckAt: integer("last_update_check_at", { mode: "timestamp" }),
   lastUpdateStatus: text("last_update_status"),
   lastUpdateError: text("last_update_error"),
+  // Backend Blueprint B18. `updateRing` defaults to the SAFEST ring, not the
+  // most convenient: a branch whose ring failed to sync should receive fewer
+  // updates, not more.
+  updateRing: text("update_ring").notNull().default("general"),
+  currentImageDigest: text("current_image_digest"),
+  previousImageDigest: text("previous_image_digest"),
+  lastSignatureStatus: text("last_signature_status"),
+  lastHealthCheckAt: integer("last_health_check_at", { mode: "timestamp" }),
+  lastHealthResult: text("last_health_result"),
+  registryUsername: text("registry_username"),
+  /** Encrypted via lib/secrets.ts, never plaintext (B18.7). */
+  registryPasswordEncrypted: text("registry_password_encrypted"),
+  // Backend Blueprint B19.7. WAL plus a month of snapshots on the small SSD
+  // of a back-office PC is a realistic way to run out of disk, and SQLite's
+  // response to a full disk is to fail the transaction -- which a clerk sees
+  // as a check-in that will not save.
+  diskWarnBytes: integer("disk_warn_bytes").notNull().default(2 * 1024 ** 3),
+  diskBlockBytes: integer("disk_block_bytes").notNull().default(512 * 1024 ** 2),
+  backupRetentionDays: integer("backup_retention_days").notNull().default(30),
+  offsiteTarget: text("offsite_target"),
+  lastRestoreTestAt: integer("last_restore_test_at", { mode: "timestamp" }),
+  lastRestoreTestResult: text("last_restore_test_result"),
 });
 
 // Cached result of the last successful pull -- every branch in this
@@ -568,12 +1164,12 @@ export const branchSyncCache = sqliteTable("branch_sync_cache", {
   branchId: text("branch_id").primaryKey(),
   branchName: text("branch_name").notNull(),
   occupancyRate: real("occupancy_rate"),
-  revenueToday: real("revenue_today"),
+  revenueTodayKobo: integer("revenue_today_kobo"),
   activeGuests: integer("active_guests"),
   openIssues: integer("open_issues"),
   roomsTotal: integer("rooms_total"),
-  adr: real("adr"),
-  revpar: real("revpar"),
+  adrKobo: integer("adr_kobo"),
+  revparKobo: integer("revpar_kobo"),
   branchManagerName: text("branch_manager_name"),
   lastSyncAt: integer("last_sync_at", { mode: "timestamp" }),
   lastSyncStatus: text("last_sync_status"),
@@ -683,4 +1279,64 @@ export const keyCardEvents = sqliteTable("key_card_events", {
   performedAt: integer("performed_at", { mode: "timestamp" }).notNull(),
   details: text("details"),
   ipAddress: text("ip_address"),
+});
+
+// ─── Night audit (Backend Blueprint B5) ─────────────────────────────────
+
+// One row per audit attempt. steps_json is what makes a run resumable:
+// each step records its own completion, so a re-run after a failure skips
+// what already succeeded rather than double-posting.
+export const nightAuditRuns = sqliteTable("night_audit_runs", {
+  id: text("id").primaryKey(),
+  branchId: text("branch_id").notNull().references(() => branches.id),
+  businessDate: integer("business_date", { mode: "timestamp" }).notNull(),
+  status: text("status").notNull(), // running|completed|failed|rolled_back
+  startedAt: integer("started_at", { mode: "timestamp" }).notNull(),
+  completedAt: integer("completed_at", { mode: "timestamp" }),
+  operatorUserId: text("operator_user_id").references(() => users.id), // null = scheduler
+  stepsJson: text("steps_json").notNull().default("[]"),
+  totalsJson: text("totals_json"),
+  exceptionsJson: text("exceptions_json").notNull().default("[]"),
+  error: text("error"),
+});
+
+// The frozen day. Every report reads from here rather than recomputing over
+// live rows -- that is what makes last month's report reproducible.
+// Immutable: reopening a day supersedes the row rather than editing it.
+export const dailyRevenue = sqliteTable("daily_revenue", {
+  id: text("id").primaryKey(),
+  branchId: text("branch_id").notNull().references(() => branches.id),
+  businessDate: integer("business_date", { mode: "timestamp" }).notNull(),
+  roomsOccupied: integer("rooms_occupied").notNull().default(0),
+  roomsAvailable: integer("rooms_available").notNull().default(0),
+  roomsOoo: integer("rooms_ooo").notNull().default(0),
+  roomRevenueKobo: integer("room_revenue_kobo").notNull().default(0),
+  fnbRevenueKobo: integer("fnb_revenue_kobo").notNull().default(0),
+  otherRevenueKobo: integer("other_revenue_kobo").notNull().default(0),
+  totalRevenueKobo: integer("total_revenue_kobo").notNull().default(0),
+  taxCollectedKobo: integer("tax_collected_kobo").notNull().default(0),
+  adrKobo: integer("adr_kobo").notNull().default(0),
+  revparKobo: integer("revpar_kobo").notNull().default(0),
+  occupancyBp: integer("occupancy_bp").notNull().default(0), // 75.5% = 7550
+  arrivals: integer("arrivals").notNull().default(0),
+  departures: integer("departures").notNull().default(0),
+  noShows: integer("no_shows").notNull().default(0),
+  walkIns: integer("walk_ins").notNull().default(0),
+  discountsKobo: integer("discounts_kobo").notNull().default(0),
+  compsKobo: integer("comps_kobo").notNull().default(0),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  nightAuditRunId: text("night_audit_run_id").references(() => nightAuditRuns.id),
+  supersededByRunId: text("superseded_by_run_id").references(() => nightAuditRuns.id),
+});
+
+// penaltyChargeId is nullable: the amount comes from the cancellation
+// policy engine (B9). Until then a no-show is recorded -- which is what
+// matters for occupancy and guest history -- without inventing a penalty.
+export const noShowPostings = sqliteTable("no_show_postings", {
+  id: text("id").primaryKey(),
+  reservationId: text("reservation_id").notNull().references(() => reservations.id),
+  businessDate: integer("business_date", { mode: "timestamp" }).notNull(),
+  penaltyChargeId: text("penalty_charge_id").references(() => folioCharges.id),
+  postedAt: integer("posted_at", { mode: "timestamp" }).notNull(),
+  postedBy: text("posted_by").references(() => users.id),
 });

@@ -3,7 +3,7 @@
 // editing a role's permissions invalidates every active session holding
 // that role on its very next request -- the two things that make this a
 // real permission system rather than a cosmetic settings screen.
-import { test, before, after } from "node:test";
+import { test, beforeAll as before, afterAll as after } from "vitest";
 import assert from "node:assert/strict";
 import http from "node:http";
 import os from "node:os";
@@ -56,7 +56,7 @@ before(async () => {
   orgId = nanoid();
   branchId = nanoid();
   db.insert(organizations).values({ id: orgId, name: "Test Org", createdAt: new Date() }).run();
-  db.insert(branches).values({ id: branchId, organizationId: orgId, name: "Test Branch", createdAt: new Date() }).run();
+  db.insert(branches).values({ id: branchId, organizationId: orgId, name: "Test Branch", createdAt: new Date(), currentBusinessDate: new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate())) }).run();
 });
 
 after(async () => {

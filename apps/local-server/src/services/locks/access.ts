@@ -10,10 +10,12 @@ import { accessCredentials, roomLockMappings, doorLockConfig } from "../../db/sc
 import { TTLockAdapter } from "./ttlockAdapter.js";
 import { LockProviderError } from "./provider.js";
 import { enqueue, logEvent } from "./queue.js";
+import { getDoorLockConfig } from "./config.js";
 
-export function getDoorLockConfig(branchId: string) {
-  return db.select().from(doorLockConfig).where(eq(doorLockConfig.branchId, branchId)).get() ?? null;
-}
+// Door-lock config access lives in ./config.ts so ttlockAdapter.ts can read
+// decrypted credentials without importing this file (which imports the
+// adapter). Re-exported here so existing callers keep working.
+export { getDoorLockConfig, readDoorLockConfigWithSecrets } from "./config.js";
 
 export function getRoomLock(roomId: string) {
   return db.select().from(roomLockMappings).where(eq(roomLockMappings.roomId, roomId)).get() ?? null;

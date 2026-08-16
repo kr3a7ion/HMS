@@ -53,8 +53,24 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 const api = {
   get: <T>(path: string) => request<T>(path),
   post: <T>(path: string, body?: unknown) => request<T>(path, { method: "POST", body: body !== undefined ? JSON.stringify(body) : undefined }),
+  patch: <T>(path: string, body?: unknown) => request<T>(path, { method: "PATCH", body: body !== undefined ? JSON.stringify(body) : undefined }),
   delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
 };
+
+/** Cursor pagination, mirroring server/src/lib/pagination.ts. */
+export interface Page<T> {
+  items: T[];
+  nextCursor: string | null;
+  hasMore: boolean;
+}
+
+/** A page of reservations, plus the trading day it was computed against. */
+export type ReservationPage = Page<EnrichedReservation> & { businessDate: string };
+
+function qs(params: Record<string, string | number | boolean | undefined>): string {
+  const pairs = Object.entries(params).filter(([, v]) => v !== undefined && v !== "");
+  return pairs.length ? `?${pairs.map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join("&")}` : "";
+}
 
 // ─── Types (mirror server/src/db/schema.ts) ────────────────────────────────
 export interface AuthUser {
@@ -91,7 +107,7 @@ export interface StaffUser {
 export interface Guest {
   id: string; branchId: string; firstName: string; lastName: string;
   email: string | null; phone: string | null;
-  idType: string | null; idNumber: string | null;
+  idType: string | null; idNumber: string | null; nationality: string | null;
   vip: boolean; blacklisted: boolean; notes: string | null; createdAt: string;
 }
 
@@ -136,10 +152,34 @@ export const authApi = {
 // ─── Front Desk vertical slice ─────────────────────────────────────────────
 export const roomsApi = {
   list: () => api.get<Room[]>("/rooms"),
+  // B10. One request returns every room with today's arrival, departure and
+  // occupant already attached, plus the unassigned arrivals that make this a
+  // work queue rather than a status display.
+  assignmentBoard: (date?: string) =>
+    api.get<AssignmentBoard>(`/rooms/assignment-board${date ? `?date=${encodeURIComponent(date)}` : ""}`),
+  assignRoom: (reservationId: string, roomId: string) =>
+    api.post<ReservationListItem>(`/reservations/${reservationId}/assign-room`, { roomId }),
 };
 
+export interface GuestStay {
+  id: string; checkInDate: string; checkOutDate: string; status: string;
+  rateKobo: number; roomNumber: string | null;
+}
+export interface GuestDetail extends Guest {
+  stays: GuestStay[];
+  /** Cancellations and no-shows excluded — a booking that never happened is not a stay. */
+  totalStays: number;
+  lastStayAt: string | null;
+  lifetimeValueKobo: number;
+}
+
 export const guestsApi = {
+  // `limit` defaults to 20 server-side (right for a type-ahead picker),
+  // capped at 200. The directory screen asks for more explicitly.
+  list: (params: { search?: string; limit?: number } = {}) =>
+    api.get<Guest[]>(`/guests${qs(params)}`),
   search: (query: string) => api.get<Guest[]>(`/guests?search=${encodeURIComponent(query)}`),
+  get: (id: string) => api.get<GuestDetail>(`/guests/${id}`),
   create: (guest: { firstName: string; lastName: string; email?: string; phone?: string }) =>
     api.post<Guest>("/guests", guest),
 };
@@ -725,6 +765,74 @@ export interface CreateReservationInput {
   specialRequests?: string;
 }
 
+// ─── B10: front-desk lists ────────────────────────────────────────────────
+// The server's `decorate()` adds guest and room detail to each reservation
+// row so a list screen does not have to fan out one request per line.
+export interface EnrichedReservation {
+  id: string; guestId: string; roomId: string | null; roomTypeId: string | null;
+  checkInDate: string; checkOutDate: string; status: string;
+  rateKobo: number; adults: number; children: number; specialRequests: string | null;
+  guestName: string | null; guestPhone: string | null; guestEmail: string | null;
+  vip: boolean;
+  roomNumber: string | null; roomTypeName: string | null; roomTypeCode: string | null;
+}
+
+/**
+ * Departures carry the folio balance; no other list does. A clerk cannot
+ * check anyone out without knowing what they owe, so the server computes it
+ * per row (after pagination, so the cost is bounded by page size).
+ */
+export interface DepartureRow extends EnrichedReservation {
+  totalChargesKobo: number;
+  totalPaidKobo: number;
+  balanceKobo: number;
+}
+
+export type DeparturePage = Page<DepartureRow> & { businessDate: string };
+
+export interface ReservationBrief {
+  reservationId: string; guestName: string | null; vip: boolean; status: string;
+  checkInDate: string; checkOutDate: string; rateKobo: number;
+}
+
+export interface AssignmentBoardRoom {
+  roomId: string; number: string; floor: string | null; type: string;
+  roomTypeId: string | null; roomTypeName: string | null;
+  status: string; housekeepingStatus: string; dnd: boolean; priority: boolean;
+  arrival: ReservationBrief | null;
+  departure: ReservationBrief | null;
+  occupant: ReservationBrief | null;
+}
+
+export interface AssignmentBoard {
+  businessDate: string;
+  summary: {
+    total: number; occupied: number; available: number; cleaning: number;
+    outOfService: number; arrivals: number; departures: number; unassignedArrivals: number;
+  };
+  rooms: AssignmentBoardRoom[];
+  unassignedArrivals: (ReservationBrief & { roomTypeId: string | null; roomTypeName: string | null })[];
+}
+
+export interface WalkInInput {
+  guest: { firstName: string; lastName: string; email?: string; phone?: string };
+  roomId: string;
+  checkOutDate: string;
+  rateKobo?: number;
+  ratePlanId?: string;
+  adults?: number;
+  children?: number;
+  depositKobo?: number;
+  depositMethod?: "cash" | "card" | "transfer";
+  specialRequests?: string;
+}
+
+export interface ReservationSearchParams {
+  q?: string; status?: string; from?: string; to?: string;
+  room?: string; ratePlanId?: string; cursor?: string; limit?: number;
+  [key: string]: string | number | undefined;
+}
+
 export const reservationsApi = {
   list: () => api.get<ReservationListItem[]>("/reservations"),
   create: (input: CreateReservationInput) => api.post<ReservationListItem>("/reservations", input),
@@ -734,6 +842,116 @@ export const reservationsApi = {
     api.post<FolioSummary>(`/reservations/${id}/folio/charges`, charge),
   checkOut: (id: string, payment?: { paymentAmountKobo: number; paymentMethod: "cash" | "card" | "transfer" }) =>
     api.post<{ reservationId: string; status: string; folio: FolioSummary; accessRevoked: { revoked: number; queued: number; failed: number } }>(`/reservations/${id}/check-out`, payment ?? {}),
+
+  // B10. `date` defaults server-side to the BUSINESS date, not the wall
+  // clock — before the roll hour the trading day is still yesterday's, and
+  // the night porter needs yesterday's arrivals, not an empty list.
+  arrivals: (params: { date?: string; cursor?: string; limit?: number } = {}) =>
+    api.get<ReservationPage>(`/reservations/arrivals${qs(params)}`),
+  departures: (params: { date?: string; cursor?: string; limit?: number } = {}) =>
+    api.get<DeparturePage>(`/reservations/departures${qs(params)}`),
+  inHouse: (params: { cursor?: string; limit?: number } = {}) =>
+    api.get<ReservationPage>(`/reservations/in-house${qs(params)}`),
+  search: (params: ReservationSearchParams = {}) =>
+    api.get<ReservationPage>(`/reservations/search${qs(params)}`),
+  walkIn: (input: WalkInInput) => api.post<ReservationDetail>("/reservations/walk-in", input),
+
+  // B9. Preview is a GET and changes nothing — it exists so the clerk can
+  // tell the guest the penalty BEFORE committing to the cancellation.
+  cancellationPreview: (id: string) =>
+    api.get<CancellationPreview>(`/reservations/${id}/cancellation-preview`),
+  cancel: (id: string, input: { reason: string; waivePenalty?: boolean }) =>
+    api.post<{ reservationId: string; status: string; penaltyKobo: number; refundId: string | null }>(`/reservations/${id}/cancel`, input),
+};
+
+export interface CancellationPreview {
+  reservationId: string;
+  policyName: string | null;
+  hoursUntilArrival: number;
+  withinFreeWindow: boolean;
+  penaltyKobo: number;
+  refundableKobo: number;
+  depositHeldKobo: number;
+  explanation: string;
+}
+
+// ─── B9: refunds ──────────────────────────────────────────────────────────
+export interface Refund {
+  id: string; reservationId: string | null; folioId: string | null;
+  amountKobo: number; reason: string; method: string;
+  status: "pending" | "approved" | "rejected" | "paid";
+  requestedBy: string; requestedByName: string | null; requestedAt: string;
+  decidedBy: string | null; decidedByName: string | null; decidedAt: string | null;
+  decisionNote: string | null;
+}
+
+export const refundsApi = {
+  list: (params: { status?: string; cursor?: string; limit?: number } = {}) =>
+    api.get<Page<Refund>>(`/refunds${qs(params)}`),
+  get: (id: string) => api.get<Refund>(`/refunds/${id}`),
+  create: (input: { reservationId?: string; folioId?: string; amountKobo: number; reason: string; method: string }) =>
+    api.post<Refund>("/refunds", input),
+  approve: (id: string, note?: string) => api.post<Refund>(`/refunds/${id}/approve`, { note }),
+  reject: (id: string, note: string) => api.post<Refund>(`/refunds/${id}/reject`, { note }),
+};
+
+// ─── B7: invoices & receipts ──────────────────────────────────────────────
+export interface Invoice {
+  id: string; number: string; reservationId: string | null; folioId: string | null;
+  guestName: string | null; issuedAt: string; dueAt: string | null;
+  subtotalKobo: number; taxKobo: number; totalKobo: number; paidKobo: number; balanceKobo: number;
+  status: "draft" | "issued" | "paid" | "void" | "credited";
+  voidReason: string | null;
+}
+export interface Receipt {
+  id: string; number: string; invoiceId: string | null; reservationId: string | null;
+  guestName: string | null; amountKobo: number; method: string; issuedAt: string;
+}
+
+export const invoicesApi = {
+  list: (params: { status?: string; cursor?: string; limit?: number } = {}) =>
+    api.get<Page<Invoice>>(`/invoices${qs(params)}`),
+  get: (id: string) => api.get<Invoice>(`/invoices/${id}`),
+  create: (input: { reservationId?: string; folioId?: string; dueAt?: string }) =>
+    api.post<Invoice>("/invoices", input),
+  void: (id: string, reason: string) => api.post<Invoice>(`/invoices/${id}/void`, { reason }),
+  creditNote: (id: string, input: { amountKobo: number; reason: string }) =>
+    api.post<Invoice>(`/invoices/${id}/credit-note`, input),
+  addPayment: (id: string, input: { amountKobo: number; method: string }) =>
+    api.post<Receipt>(`/invoices/${id}/payments`, input),
+};
+
+export const receiptsApi = {
+  list: (params: { cursor?: string; limit?: number } = {}) =>
+    api.get<Page<Receipt>>(`/receipts${qs(params)}`),
+  get: (id: string) => api.get<Receipt>(`/receipts/${id}`),
+};
+
+// ─── B8: rate plans & calendar ────────────────────────────────────────────
+export interface RatePlan {
+  id: string; code: string; name: string; roomTypeId: string | null;
+  baseRateKobo: number; currency: string; isActive: boolean;
+  minStayNights: number | null; maxStayNights: number | null;
+  includesBreakfast: boolean; refundable: boolean; description: string | null;
+}
+export interface RateCalendarEntry {
+  date: string; ratePlanId: string; roomTypeId: string | null;
+  rateKobo: number; closed: boolean; minStayNights: number | null;
+  isOverride: boolean;
+}
+
+export const ratePlansApi = {
+  list: () => api.get<RatePlan[]>("/rate-plans"),
+  create: (input: Partial<RatePlan> & { code: string; name: string; baseRateKobo: number }) =>
+    api.post<RatePlan>("/rate-plans", input),
+  update: (id: string, input: Partial<RatePlan>) => api.patch<RatePlan>(`/rate-plans/${id}`, input),
+};
+
+export const rateCalendarApi = {
+  list: (params: { from: string; to: string; ratePlanId?: string }) =>
+    api.get<RateCalendarEntry[]>(`/rate-calendar${qs(params)}`),
+  bulk: (input: { ratePlanId: string; from: string; to: string; rateKobo?: number; closed?: boolean; minStayNights?: number; weekdays?: number[] }) =>
+    api.post<{ updated: number }>("/rate-calendar/bulk", input),
 };
 
 // ─── Door Lock & Access Control (Phase 4, Blueprint Part 6) ────────────────

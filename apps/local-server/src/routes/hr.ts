@@ -20,6 +20,8 @@ import { hashPassword } from "../auth/passwords.js";
 import { PERMISSION_KEYS } from "../auth/permissionKeys.js";
 import { roleHasAnyPermission, roleExists } from "../auth/permissions.js";
 import { logAudit } from "../services/audit.js";
+import { immediateTransaction } from "../db/tx.js";
+import { HandlerError, isHandlerError } from "../lib/handlerError.js";
 
 const router = Router();
 
@@ -28,7 +30,7 @@ const STAFF_COLUMNS = {
   id: users.id, email: users.email, role: users.role, firstName: users.firstName, lastName: users.lastName,
   status: users.status, employeeId: users.employeeId, department: users.department, phone: users.phone,
   emergencyContactName: users.emergencyContactName, emergencyContactPhone: users.emergencyContactPhone,
-  startDate: users.startDate, payRate: users.payRate, contractType: users.contractType, createdAt: users.createdAt,
+  startDate: users.startDate, payRateKobo: users.payRateKobo, contractType: users.contractType, createdAt: users.createdAt,
 };
 
 function isSelfOrManager(req: AuthedRequest, staffId: string) {
@@ -49,7 +51,7 @@ const createStaffSchema = z.object({
   email: z.string().email(), firstName: z.string().min(1), lastName: z.string().min(1),
   role: z.string().min(1),
   department: z.string().min(1), phone: z.string().optional(),
-  payRate: z.number().nonnegative().optional(),
+  payRateKobo: z.number().int().nonnegative().optional(),
   contractType: z.enum(["Full-time", "Part-time", "Contract"]).optional(),
 });
 
@@ -81,7 +83,7 @@ router.post("/staff", requireAuth, requirePermission("hr:manage"), async (req: A
     email, passwordHash, role: parsed.data.role,
     firstName: parsed.data.firstName, lastName: parsed.data.lastName, status: "active",
     createdAt: now, employeeId, department: parsed.data.department,
-    phone: parsed.data.phone, startDate: now, payRate: parsed.data.payRate,
+    phone: parsed.data.phone, startDate: now, payRateKobo: parsed.data.payRateKobo,
     contractType: parsed.data.contractType,
   }).run();
 
@@ -164,15 +166,15 @@ router.post("/staff/:id/reset-password", requireAuth, requirePermission("hr:mana
   res.json({ tempPassword });
 });
 
-const payRateSchema = z.object({ payRate: z.number().nonnegative() });
+const payRateSchema = z.object({ payRateKobo: z.number().int().nonnegative() });
 
 router.post("/staff/:id/pay-rate", requireAuth, requirePermission("hr:payroll"), (req: AuthedRequest, res) => {
   const staff = db.select().from(users).where(and(eq(users.id, req.params.id), eq(users.branchId, req.auth!.branchId))).get();
   if (!staff) return res.status(404).json({ error: "NOT_FOUND" });
   const parsed = payRateSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "INVALID_INPUT" });
-  db.update(users).set({ payRate: parsed.data.payRate }).where(eq(users.id, staff.id)).run();
-  logAudit({ userId: req.auth!.userId, branchId: req.auth!.branchId, action: "staff_pay_rate_changed", module: "HR & Staff", recordId: staff.id, details: `${staff.firstName} ${staff.lastName} -> ${parsed.data.payRate}`, ipAddress: req.ip });
+  db.update(users).set({ payRateKobo: parsed.data.payRateKobo }).where(eq(users.id, staff.id)).run();
+  logAudit({ userId: req.auth!.userId, branchId: req.auth!.branchId, action: "staff_pay_rate_changed", module: "HR & Staff", recordId: staff.id, details: `${staff.firstName} ${staff.lastName} -> ${parsed.data.payRateKobo}`, ipAddress: req.ip });
   res.json({ ok: true });
 });
 
@@ -209,13 +211,17 @@ router.post("/attendance", requireAuth, requirePermission("hr:payroll"), (req: A
   const staff = db.select().from(users).where(and(eq(users.id, parsed.data.userId), eq(users.branchId, req.auth!.branchId))).get();
   if (!staff) return res.status(400).json({ error: "STAFF_NOT_FOUND" });
 
-  const existing = db.select().from(attendance).where(and(eq(attendance.userId, parsed.data.userId), eq(attendance.date, parsed.data.date))).get();
   const now = new Date();
-  if (existing) {
-    db.update(attendance).set({ status: parsed.data.status, notes: parsed.data.notes, recordedBy: req.auth!.userId, recordedAt: now }).where(eq(attendance.id, existing.id)).run();
-  } else {
-    db.insert(attendance).values({ id: nanoid(), branchId: req.auth!.branchId, userId: parsed.data.userId, date: parsed.data.date, status: parsed.data.status, notes: parsed.data.notes, recordedBy: req.auth!.userId, recordedAt: now }).run();
-  }
+  // Read-then-upsert: IMMEDIATE so two records for the same person and day
+  // cannot both miss the existing row and both insert.
+  immediateTransaction(() => {
+    const existing = db.select().from(attendance).where(and(eq(attendance.userId, parsed.data.userId), eq(attendance.date, parsed.data.date))).get();
+    if (existing) {
+      db.update(attendance).set({ status: parsed.data.status, notes: parsed.data.notes, recordedBy: req.auth!.userId, recordedAt: now }).where(eq(attendance.id, existing.id)).run();
+    } else {
+      db.insert(attendance).values({ id: nanoid(), branchId: req.auth!.branchId, userId: parsed.data.userId, date: parsed.data.date, status: parsed.data.status, notes: parsed.data.notes, recordedBy: req.auth!.userId, recordedAt: now }).run();
+    }
+  });
   res.status(201).json({ ok: true });
 });
 
@@ -247,19 +253,34 @@ router.post("/leave-requests/:id/decide", requireAuth, requirePermission("hr:pay
   const parsed = decideLeaveSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "INVALID_INPUT" });
 
-  db.update(leaveRequests).set({ status: parsed.data.decision, decidedBy: req.auth!.userId, decidedAt: new Date() }).where(eq(leaveRequests.id, leave.id)).run();
-  logAudit({ userId: req.auth!.userId, branchId: req.auth!.branchId, action: `leave_request_${parsed.data.decision}`, module: "HR & Staff", recordId: leave.id, details: `${leave.startDate} to ${leave.endDate}`, ipAddress: req.ip });
+  // The decision and the attendance days it implies are one unit: an
+  // approved leave whose days were only half-marked leaves the person
+  // showing as absent for the rest of it. IMMEDIATE because "still
+  // pending?" is a check-then-write -- two managers must not both decide.
+  try {
+    immediateTransaction(() => {
+      const current = db.select().from(leaveRequests).where(eq(leaveRequests.id, leave.id)).get();
+      if (!current) throw new HandlerError(404, "NOT_FOUND");
+      if (current.status !== "pending") throw new HandlerError(409, "ALREADY_DECIDED", { status: current.status });
 
-  if (parsed.data.decision === "approved") {
-    const start = new Date(leave.startDate);
-    const end = new Date(leave.endDate);
-    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-      const dateStr = d.toISOString().slice(0, 10);
-      const existing = db.select().from(attendance).where(and(eq(attendance.userId, leave.userId), eq(attendance.date, dateStr))).get();
-      const now = new Date();
-      if (existing) db.update(attendance).set({ status: "leave", recordedBy: req.auth!.userId, recordedAt: now }).where(eq(attendance.id, existing.id)).run();
-      else db.insert(attendance).values({ id: nanoid(), branchId: req.auth!.branchId, userId: leave.userId, date: dateStr, status: "leave", recordedBy: req.auth!.userId, recordedAt: now }).run();
-    }
+      db.update(leaveRequests).set({ status: parsed.data.decision, decidedBy: req.auth!.userId, decidedAt: new Date() }).where(eq(leaveRequests.id, leave.id)).run();
+      logAudit({ userId: req.auth!.userId, branchId: req.auth!.branchId, action: `leave_request_${parsed.data.decision}`, module: "HR & Staff", recordId: leave.id, details: `${leave.startDate} to ${leave.endDate}`, ipAddress: req.ip });
+
+      if (parsed.data.decision === "approved") {
+        const start = new Date(leave.startDate);
+        const end = new Date(leave.endDate);
+        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+          const dateStr = d.toISOString().slice(0, 10);
+          const existing = db.select().from(attendance).where(and(eq(attendance.userId, leave.userId), eq(attendance.date, dateStr))).get();
+          const now = new Date();
+          if (existing) db.update(attendance).set({ status: "leave", recordedBy: req.auth!.userId, recordedAt: now }).where(eq(attendance.id, existing.id)).run();
+          else db.insert(attendance).values({ id: nanoid(), branchId: req.auth!.branchId, userId: leave.userId, date: dateStr, status: "leave", recordedBy: req.auth!.userId, recordedAt: now }).run();
+        }
+      }
+    });
+  } catch (err) {
+    if (isHandlerError(err)) return res.status(err.status).json({ error: err.code, ...err.detail });
+    throw err;
   }
   res.json({ ok: true });
 });
@@ -281,9 +302,11 @@ router.post("/shifts", requireAuth, requirePermission("hr:manage"), (req: Authed
   const staff = db.select().from(users).where(and(eq(users.id, parsed.data.userId), eq(users.branchId, req.auth!.branchId))).get();
   if (!staff) return res.status(400).json({ error: "STAFF_NOT_FOUND" });
 
-  const existing = db.select().from(shifts).where(and(eq(shifts.userId, parsed.data.userId), eq(shifts.date, parsed.data.date))).get();
-  if (existing) db.update(shifts).set({ shiftType: parsed.data.shiftType }).where(eq(shifts.id, existing.id)).run();
-  else db.insert(shifts).values({ id: nanoid(), branchId: req.auth!.branchId, userId: parsed.data.userId, date: parsed.data.date, shiftType: parsed.data.shiftType, published: false, createdBy: req.auth!.userId, createdAt: new Date() }).run();
+  immediateTransaction(() => {
+    const existing = db.select().from(shifts).where(and(eq(shifts.userId, parsed.data.userId), eq(shifts.date, parsed.data.date))).get();
+    if (existing) db.update(shifts).set({ shiftType: parsed.data.shiftType }).where(eq(shifts.id, existing.id)).run();
+    else db.insert(shifts).values({ id: nanoid(), branchId: req.auth!.branchId, userId: parsed.data.userId, date: parsed.data.date, shiftType: parsed.data.shiftType, published: false, createdBy: req.auth!.userId, createdAt: new Date() }).run();
+  });
   res.status(201).json({ ok: true });
 });
 
@@ -335,12 +358,12 @@ router.get("/payroll", requireAuth, requirePermission("hr:payroll"), (req: Authe
   const staff = db.select(STAFF_COLUMNS).from(users)
     .where(and(eq(users.branchId, req.auth!.branchId), eq(users.status, "active")))
     .all()
-    .filter(s => s.payRate != null);
+    .filter(s => s.payRateKobo != null);
 
   const results = staff.map(s => {
     const records = db.select().from(attendance).where(and(eq(attendance.userId, s.id), gte(attendance.date, periodStart), lte(attendance.date, periodEnd))).all();
     const absentDays = records.filter(r => r.status === "absent").length;
-    const baseSalary = s.payRate ?? 0;
+    const baseSalary = s.payRateKobo ?? 0;
     const deductions = Math.round((baseSalary / 30) * absentDays);
     const net = baseSalary - deductions;
     return { id: s.id, firstName: s.firstName, lastName: s.lastName, department: s.department, baseSalary, overtime: 0, absentDays, deductions, net };

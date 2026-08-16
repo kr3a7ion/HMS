@@ -12,6 +12,11 @@ import { db } from "../db/client.js";
 import { menuCategories, menuItems, restaurantTables, restaurantOrders, restaurantOrderItems, reservations, guests, rooms, folioCharges } from "../db/schema.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../auth/middleware.js";
 import { logAudit } from "../services/audit.js";
+import { transaction, immediateTransaction } from "../db/tx.js";
+import { HandlerError, isHandlerError } from "../lib/handlerError.js";
+import { addKobo, valueKobo, formatNaira } from "../lib/money.js";
+import { currentBusinessDate } from "../lib/businessDate.js";
+import { postChargeWithTax } from "../services/tax/posting.js";
 
 const router = Router();
 
@@ -35,7 +40,7 @@ router.post("/menu/categories", requireAuth, requirePermission("restaurant:manag
   res.status(201).json({ id });
 });
 
-const createItemSchema = z.object({ categoryId: z.string(), name: z.string().min(1), price: z.number().positive() });
+const createItemSchema = z.object({ categoryId: z.string(), name: z.string().min(1), priceKobo: z.number().int().positive() });
 
 router.post("/menu/items", requireAuth, requirePermission("restaurant:manage"), (req: AuthedRequest, res) => {
   const parsed = createItemSchema.safeParse(req.body);
@@ -44,7 +49,7 @@ router.post("/menu/items", requireAuth, requirePermission("restaurant:manage"), 
   if (!category || category.branchId !== req.auth!.branchId) return res.status(400).json({ error: "CATEGORY_NOT_FOUND" });
 
   const id = nanoid();
-  db.insert(menuItems).values({ id, branchId: req.auth!.branchId, categoryId: parsed.data.categoryId, name: parsed.data.name, price: parsed.data.price, available: true }).run();
+  db.insert(menuItems).values({ id, branchId: req.auth!.branchId, categoryId: parsed.data.categoryId, name: parsed.data.name, priceKobo: parsed.data.priceKobo, available: true }).run();
   logAudit({ userId: req.auth!.userId, branchId: req.auth!.branchId, action: "menu_item_created", module: "Restaurant", recordId: id, details: parsed.data.name, ipAddress: req.ip });
   res.status(201).json({ id });
 });
@@ -81,7 +86,7 @@ router.post("/tables/:id/status", requireAuth, requirePermission("restaurant:man
 // ─── Orders (RT-01, RT-02, RT-06) ───────────────────────────────────────────
 function orderTotal(orderId: string) {
   return db.select().from(restaurantOrderItems).where(eq(restaurantOrderItems.orderId, orderId)).all()
-    .reduce((sum, i) => sum + i.quantity * i.unitPrice, 0);
+    .reduce((sum, i) => addKobo(sum, valueKobo(i.unitPriceKobo, i.quantity)), 0);
 }
 
 router.get("/orders", requireAuth, requirePermission("restaurant:manage"), (req: AuthedRequest, res) => {
@@ -113,22 +118,31 @@ router.post("/orders", requireAuth, requirePermission("restaurant:operate"), (re
   const parsed = createOrderSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "INVALID_INPUT" });
 
-  if (parsed.data.tableId) {
-    const table = db.select().from(restaurantTables).where(eq(restaurantTables.id, parsed.data.tableId)).get();
-    if (!table || table.branchId !== req.auth!.branchId) return res.status(400).json({ error: "TABLE_NOT_FOUND" });
-    db.update(restaurantTables).set({ status: "occupied" }).where(eq(restaurantTables.id, table.id)).run();
-  } else if (parsed.data.roomReservationId) {
-    const reservation = db.select().from(reservations).where(eq(reservations.id, parsed.data.roomReservationId)).get();
-    if (!reservation || reservation.branchId !== req.auth!.branchId) return res.status(400).json({ error: "RESERVATION_NOT_FOUND" });
-    if (reservation.status !== "checked_in") return res.status(409).json({ error: "GUEST_NOT_IN_HOUSE" });
-  }
-
   const id = nanoid();
-  db.insert(restaurantOrders).values({
-    id, branchId: req.auth!.branchId, tableId: parsed.data.tableId, roomReservationId: parsed.data.roomReservationId,
-    status: "open", serverId: req.auth!.userId, createdAt: new Date(),
-  }).run();
-  logAudit({ userId: req.auth!.userId, branchId: req.auth!.branchId, action: "restaurant_order_opened", module: "Restaurant", recordId: id, ipAddress: req.ip });
+  // Marking the table occupied and opening the order are one unit -- a
+  // table flipped to occupied with no order behind it blocks a real cover.
+  try {
+    transaction(() => {
+      if (parsed.data.tableId) {
+        const table = db.select().from(restaurantTables).where(eq(restaurantTables.id, parsed.data.tableId)).get();
+        if (!table || table.branchId !== req.auth!.branchId) throw new HandlerError(400, "TABLE_NOT_FOUND");
+        db.update(restaurantTables).set({ status: "occupied" }).where(eq(restaurantTables.id, table.id)).run();
+      } else if (parsed.data.roomReservationId) {
+        const reservation = db.select().from(reservations).where(eq(reservations.id, parsed.data.roomReservationId)).get();
+        if (!reservation || reservation.branchId !== req.auth!.branchId) throw new HandlerError(400, "RESERVATION_NOT_FOUND");
+        if (reservation.status !== "checked_in") throw new HandlerError(409, "GUEST_NOT_IN_HOUSE");
+      }
+
+      db.insert(restaurantOrders).values({
+        id, branchId: req.auth!.branchId, tableId: parsed.data.tableId, roomReservationId: parsed.data.roomReservationId,
+        status: "open", serverId: req.auth!.userId, createdAt: new Date(),
+      }).run();
+      logAudit({ userId: req.auth!.userId, branchId: req.auth!.branchId, action: "restaurant_order_opened", module: "Restaurant", recordId: id, ipAddress: req.ip });
+    });
+  } catch (err) {
+    if (isHandlerError(err)) return res.status(err.status).json({ error: err.code, ...err.detail });
+    throw err;
+  }
   res.status(201).json({ id });
 });
 
@@ -148,7 +162,7 @@ router.get("/orders/:id", requireAuth, requirePermission("restaurant:manage"), (
   const order = loadOrderOrNull(req.params.id, req.auth!.branchId);
   if (!order) return res.status(404).json({ error: "NOT_FOUND" });
   const items = db.select().from(restaurantOrderItems).where(eq(restaurantOrderItems.orderId, order.id)).all();
-  res.json({ ...order, items, total: items.reduce((s, i) => s + i.quantity * i.unitPrice, 0) });
+  res.json({ ...order, items, total: addKobo(...items.map(i => valueKobo(i.unitPriceKobo, i.quantity))) });
 });
 
 const addItemSchema = z.object({ menuItemId: z.string(), quantity: z.number().int().positive().default(1) });
@@ -167,11 +181,11 @@ router.post("/orders/:id/items", requireAuth, requirePermission("restaurant:oper
 
   db.insert(restaurantOrderItems).values({
     id: nanoid(), orderId: order.id, menuItemId: menuItem.id, name: menuItem.name,
-    quantity: parsed.data.quantity, unitPrice: menuItem.price, status: "pending",
+    quantity: parsed.data.quantity, unitPriceKobo: menuItem.priceKobo, status: "pending",
   }).run();
 
   const items = db.select().from(restaurantOrderItems).where(eq(restaurantOrderItems.orderId, order.id)).all();
-  res.status(201).json({ items, total: items.reduce((s, i) => s + i.quantity * i.unitPrice, 0) });
+  res.status(201).json({ items, total: addKobo(...items.map(i => valueKobo(i.unitPriceKobo, i.quantity))) });
 });
 
 router.post("/orders/:id/send-to-kitchen", requireAuth, requirePermission("restaurant:operate"), (req: AuthedRequest, res) => {
@@ -192,12 +206,16 @@ router.post("/orders/:id/items/:itemId/status", requireAuth, requirePermission("
 
   const parsed = itemStatusSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "INVALID_INPUT" });
+  // The item bump and the "whole order is served" rollup derived from it
+  // must not be able to disagree.
+  transaction(() => {
   db.update(restaurantOrderItems).set({ status: parsed.data.status }).where(eq(restaurantOrderItems.id, item.id)).run();
 
   const items = db.select().from(restaurantOrderItems).where(eq(restaurantOrderItems.orderId, order.id)).all();
   if (items.length > 0 && items.every(i => i.status === "served")) {
     db.update(restaurantOrders).set({ status: "served" }).where(eq(restaurantOrders.id, order.id)).run();
   }
+  });
   res.json({ ok: true });
 });
 
@@ -218,28 +236,53 @@ router.post("/orders/:id/close", requireAuth, requirePermission("restaurant:oper
 
   const items = db.select().from(restaurantOrderItems).where(eq(restaurantOrderItems.orderId, order.id)).all();
   if (items.length === 0) return res.status(400).json({ error: "ORDER_EMPTY" });
-  const total = items.reduce((s, i) => s + i.quantity * i.unitPrice, 0);
+  const totalKobo = addKobo(...items.map(i => valueKobo(i.unitPriceKobo, i.quantity)));
 
-  if (parsed.data.postToRoom) {
-    if (!order.roomReservationId) return res.status(400).json({ error: "NO_ROOM_LINKED" });
-    const reservation = db.select().from(reservations).where(eq(reservations.id, order.roomReservationId)).get();
-    if (!reservation || reservation.status !== "checked_in") return res.status(409).json({ error: "GUEST_NOT_IN_HOUSE" });
-    db.insert(folioCharges).values({
-      id: nanoid(), reservationId: order.roomReservationId, category: "Restaurant",
-      description: `Order ${order.id.slice(0, 8)} — ${items.map(i => `${i.name} x${i.quantity}`).join(", ")}`,
-      quantity: 1, unitPrice: total, amount: total, postedBy: req.auth!.userId, postedAt: new Date(),
-    }).run();
-    db.update(restaurantOrders).set({ status: "closed", closedAt: new Date() }).where(eq(restaurantOrders.id, order.id)).run();
-  } else {
-    db.update(restaurantOrders).set({
-      status: "closed", closedAt: new Date(), paymentMethod: parsed.data.paymentMethod, paidAmount: total,
-    }).where(eq(restaurantOrders.id, order.id)).run();
+  // The blueprint's "restaurant order -> folio posting path". Four writes,
+  // and the dangerous split is the folio charge landing while the order
+  // stays open: the guest is billed and the order can be closed again,
+  // billing them twice. IMMEDIATE because "is this order already closed?"
+  // is a check-then-write -- two taps on Close must not both post.
+  try {
+    immediateTransaction(() => {
+      const current = db.select().from(restaurantOrders).where(eq(restaurantOrders.id, order.id)).get();
+      if (!current) throw new HandlerError(404, "NOT_FOUND");
+      if (current.status === "closed") throw new HandlerError(409, "ALREADY_CLOSED");
+
+      if (parsed.data.postToRoom) {
+        if (!order.roomReservationId) throw new HandlerError(400, "NO_ROOM_LINKED");
+        const reservation = db.select().from(reservations).where(eq(reservations.id, order.roomReservationId)).get();
+        if (!reservation || reservation.status !== "checked_in") throw new HandlerError(409, "GUEST_NOT_IN_HOUSE");
+        // B6: through the engine, same as every other posting path. F&B is
+        // where a bypass hides longest -- nobody audits the minibar -- so
+        // this deliberately shares one code path with the room charge.
+        postChargeWithTax({
+          reservationId: order.roomReservationId,
+          branchId: req.auth!.branchId,
+          category: "Restaurant",
+          description: `Order ${order.id.slice(0, 8)} — ${items.map(i => `${i.name} x${i.quantity}`).join(", ")}`,
+          quantity: 1,
+          unitPriceKobo: totalKobo,
+          amountKobo: totalKobo,
+          postedBy: req.auth!.userId,
+          businessDate: currentBusinessDate(req.auth!.branchId),
+        });
+        db.update(restaurantOrders).set({ status: "closed", closedAt: new Date() }).where(eq(restaurantOrders.id, order.id)).run();
+      } else {
+        db.update(restaurantOrders).set({
+          status: "closed", closedAt: new Date(), paymentMethod: parsed.data.paymentMethod, paidAmountKobo: totalKobo,
+        }).where(eq(restaurantOrders.id, order.id)).run();
+      }
+
+      if (order.tableId) db.update(restaurantTables).set({ status: "dirty" }).where(eq(restaurantTables.id, order.tableId)).run();
+
+      logAudit({ userId: req.auth!.userId, branchId: req.auth!.branchId, action: "restaurant_order_closed", module: "Restaurant", recordId: order.id, details: parsed.data.postToRoom ? `Posted to room (${formatNaira(totalKobo)})` : `${parsed.data.paymentMethod} (${formatNaira(totalKobo)})`, ipAddress: req.ip });
+    });
+  } catch (err) {
+    if (isHandlerError(err)) return res.status(err.status).json({ error: err.code, ...err.detail });
+    throw err;
   }
-
-  if (order.tableId) db.update(restaurantTables).set({ status: "dirty" }).where(eq(restaurantTables.id, order.tableId)).run();
-
-  logAudit({ userId: req.auth!.userId, branchId: req.auth!.branchId, action: "restaurant_order_closed", module: "Restaurant", recordId: order.id, details: parsed.data.postToRoom ? `Posted to room (${total})` : `${parsed.data.paymentMethod} (${total})`, ipAddress: req.ip });
-  res.json({ id: order.id, status: "closed", total });
+  res.json({ id: order.id, status: "closed", totalKobo });
 });
 
 // RT-07 Guest Room Charges. A read view over folio_charges -- same table
@@ -260,7 +303,7 @@ router.get("/room-charges", requireAuth, requirePermission("folio:postcharge"), 
     const guest = db.select().from(guests).where(eq(guests.id, r.guestId)).get();
     const room = r.roomId ? db.select().from(rooms).where(eq(rooms.id, r.roomId)).get() : null;
     return {
-      id: c.id, reservationId: c.reservationId, description: c.description, amount: c.amount, postedAt: c.postedAt,
+      id: c.id, reservationId: c.reservationId, description: c.description, amountKobo: c.amountKobo, postedAt: c.postedAt,
       guestFirstName: guest?.firstName ?? null, guestLastName: guest?.lastName ?? null, roomNumber: room?.number ?? null,
     };
   });
