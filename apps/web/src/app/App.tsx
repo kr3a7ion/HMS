@@ -30,7 +30,7 @@ import {
 import { LoginScreen, ForgotPasswordScreen, ForceChangePasswordScreen } from "./Auth";
 import AdminConsole from "./AdminConsole";
 import OrgPortal from "./OrgPortal";
-import { authApi, settingsApi, doorLockApi, syncApi, type AuthUser, type ModuleKey, type LockQueueItem, type SyncStatus } from "./lib/api";
+import { authApi, settingsApi, doorLockApi, syncApi, ApiError, type AuthUser, type ModuleKey, type LockQueueItem, type SyncStatus } from "./lib/api";
 import { OfflineBanner } from "./components/OfflineBanner";
 import { PermissionProvider } from "./components/RoleGate";
 import { useConnection } from "./lib/connection";
@@ -113,39 +113,70 @@ export default function App() {
 }
 
 // ─── Sync pill (real) ─────────────────────────────────────────────────────────
-// Reports GET /sync/status. Three states worth distinguishing, because they
-// mean different things to whoever is looking at the header:
+// TWO DIFFERENT FACTS SHARE THIS PILL, and conflating them was a bug.
 //
-//   not configured  -- single-property install, no central server. NORMAL.
-//                      Showing "Offline" here would be wrong; there is
-//                      nothing it is supposed to be connected to.
-//   pending > 0     -- sync works, N records still waiting to go up.
-//   failed          -- the last push errored. This is the one that matters.
+// The first is whether this browser can reach the PROPERTY SERVER. Every
+// role needs that, and it needs no permission to know — it is observed from
+// our own requests (lib/connection.ts).
+//
+// The second is the state of sync to the CENTRAL server. That is behind
+// `admin:operations`, which FD, HK and RT will never hold.
+//
+// The first version read only the second fact and returned null when it
+// could not: a 403 was swallowed and the pill vanished from the header for
+// every front-desk and housekeeping user. That silently removed a piece of
+// chrome staff had always had — the same class of mistake as dropping a
+// control while wiring. The pill now ALWAYS renders the connection state,
+// and adds sync detail only for the roles that can see it.
 function SyncPillLive({ add }: { add: AddToast }) {
   const [status, setStatus] = useState<SyncStatus | null>(null);
+  const [canReadSync, setCanReadSync] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const offline = useConnection().state === "offline";
 
   const load = useCallback(() => {
-    syncApi.status().then(setStatus).catch(() => { /* pill just stays quiet */ });
+    syncApi.status()
+      .then(s => { setStatus(s); setCanReadSync(true); })
+      .catch(err => {
+        // A 403 is not a failure to report — it means this role simply does
+        // not see sync. Stop asking; anything else may be transient.
+        if (err instanceof ApiError && err.status === 403) setCanReadSync(false);
+      });
   }, []);
 
   useEffect(() => {
+    if (!canReadSync) return;
     load();
     const t = setInterval(load, 60_000);
     return () => clearInterval(t);
-  }, [load]);
+  }, [load, canReadSync]);
 
-  if (!status) return null;
-  if (!status.configured) return null;   // nothing to sync to — say nothing
+  const syncFailed = status != null && status.configured
+    && (status.lastPushStatus === "error" || status.lastPullStatus === "error");
+  const pending = status?.configured ? status.pendingItemCount : 0;
 
-  const failed = status.lastPushStatus === "error" || status.lastPullStatus === "error";
-  const pending = status.pendingItemCount;
-  const colour = failed ? "#EF4444" : pending > 0 ? "#F59E0B" : "#22C55E";
-  const label = failed ? "Sync failed" : pending > 0 ? `${pending} pending` : "Synced";
+  // Connection state outranks sync state: if the property server is
+  // unreachable, what central thinks is not the useful thing to show.
+  let colour = "#22C55E";
+  let label = "Connected";
+  if (offline) { colour = "#EF4444"; label = "Offline"; }
+  else if (syncFailed) { colour = "#EF4444"; label = "Sync failed"; }
+  else if (pending > 0) { colour = "#F59E0B"; label = `${pending} pending`; }
+  else if (status?.configured) { label = "Synced"; }
+
+  const canSyncNow = canReadSync && status?.configured === true && !offline;
+
+  const title = offline
+    ? "Can't reach the property server"
+    : !canReadSync
+      ? "Connected to the property server"
+      : status?.configured
+        ? (status.lastPushError ?? (status.lastPushAt ? `Last push ${new Date(status.lastPushAt).toLocaleString()}` : "Never pushed"))
+        : "Connected. No central server is configured for this property.";
 
   return (
     <button
-      onClick={async () => {
+      onClick={canSyncNow ? async () => {
         setSyncing(true);
         try {
           const r = await syncApi.syncNow();
@@ -161,11 +192,15 @@ function SyncPillLive({ add }: { add: AddToast }) {
           setSyncing(false);
           load();
         }
-      }}
+      } : undefined}
       disabled={syncing}
-      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium text-white cursor-pointer hover:opacity-80"
-      style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)" }}
-      title={status.lastPushError ?? (status.lastPushAt ? `Last push ${new Date(status.lastPushAt).toLocaleString()}` : "Never pushed")}>
+      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium text-white"
+      style={{
+        backgroundColor: "rgba(255,255,255,0.07)",
+        border: "1px solid rgba(255,255,255,0.1)",
+        cursor: canSyncNow ? "pointer" : "default",
+      }}
+      title={title}>
       <span className="w-2 h-2 rounded-full" style={{ backgroundColor: colour, boxShadow: `0 0 6px ${colour}` }} />
       {syncing ? "Syncing…" : label}
     </button>
