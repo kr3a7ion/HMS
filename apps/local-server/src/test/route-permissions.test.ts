@@ -61,6 +61,7 @@ const AUTHENTICATED_ONLY = new Map<string, string>([
   ["GET /reservations/in-house", "shift list, same data as the grid"],
   ["GET /settings/branch", "the sidebar needs enabledModules for every role"],
   ["GET /guests/", "guest lookup is core front-desk work; creating and editing are gated on guests:create"],
+  ["GET /guests/:id", "guest profile detail — same rows as the list above, plus this guest's own stay history. A clerk taking a booking needs to see whether the person has stayed before and what they were charged; withholding it from the roles that can already read the list would only push them to the reservation grid to reconstruct it by hand"],
   ["GET /lost-found/", "any staff member may check whether an item was handed in; logging, claiming and disposing are gated"],
   ["GET /housekeeping/rooms", "room status is read by front desk, maintenance and housekeeping alike"],
   ["GET /housekeeping/inspections", "inspection history over the branch's own rooms; recording one is gated"],

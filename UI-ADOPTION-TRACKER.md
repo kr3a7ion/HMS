@@ -441,6 +441,7 @@ Doc 3 §5 (quality gates). A screen is not checked off until:
 
 | Date | Item | Note |
 |---|---|---|
+| 2026-08-16 | **The route audit caught my new endpoint** | `route-permissions.test.ts` (B17.7) failed: it enumerates every endpoint and refuses to pass until each is explicitly classified, and `GET /guests/:id` was in no bucket. Classified as authenticated-only with a written reason. **It caught what live verification did not** — I had confirmed the endpoint returned correct data and 404'd properly, but never asked who may call it. Rule for the remaining screens: a new endpoint and its route-permission entry go in the same change. 314/314 green after the fix. |
 | 2026-08-16 | **Wiring started — Arrivals + Departures live** | Client API extended with the B7–B10 surface and **verified against the running server**, not just typechecked: response shapes confirmed field-by-field, balance arithmetic checked (₦206,335.00 − ₦130,000.00 = ₦76,335.00). |
 | 2026-08-16 | **Tracker error corrected** | §6 claimed `GET /guests/:id` existed. It did not. Added it, plus a `limit` parameter on `GET /guests` (was a hardcoded 20 that silently truncated the guest directory). OpenAPI now 229 endpoints. |
 | 2026-08-16 | **Three columns have no data behind them** | Arrivals "ETA", Departures "Checkout Time" and "Late Checkout" were mock values with no schema field. All three columns kept and read “—” rather than being deleted or invented. Needs a schema decision. |
