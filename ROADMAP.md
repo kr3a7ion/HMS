@@ -1,5 +1,10 @@
 # Nexura Roadmap
 
+See also `UI-ADOPTION-TRACKER.md` — the working checklist for adopting the
+Figma Make export (commit `aa66a30`, 2026-08-16) into `apps/web`, screen by
+screen. This file stays the authoritative build-status tracker; that one tracks
+UI adoption only.
+
 See also `ULTIMATE_BLUEPRINT.md` — a design-facing companion doc (current
 architecture/auth/screens summarized for a design tool, competitor research,
 and a proposed visual redesign direction). This file remains the
@@ -1805,3 +1810,1544 @@ market), freemium/commission-based pricing (conflicts with Blueprint Part
         including that the settings-change entry lists which *fields*
         changed, never the values (that endpoint's payload can include
         door-lock secrets in a different route using the same pattern).
+
+---
+
+## Backend Build Blueprint — batched hardening (`Nexura-Backend-Build-Blueprint.md`)
+
+A separate, execution-oriented spec (B0–B35) that supersedes the ad-hoc
+"what's next" ordering for backend work. It is organised around ten
+non-negotiable invariants (offline-first, integer-kobo money, transactional
+multi-writes, append-only ledgers, migrations-only schema changes, branch
+scoping, declared permissions, audit coverage, business-date stamping,
+gapless numbering). Batches B1–B5 are load-bearing and must not be
+reordered.
+
+**Blueprint-vs-reality discrepancies, resolved deliberately:**
+- Blueprint says *pnpm workspace*; the real, verified toolchain is **npm
+  with a separate `package-lock.json` per app** (`pnpm-workspace.yaml`
+  exists but nothing uses it). Scripts are `npm run ...`, and Dependabot is
+  configured per-package for the same reason.
+- Blueprint says central-server is *Postgres*; it is really
+  **better-sqlite3**, same as local-server. Not changed — nothing yet needs
+  Postgres, and switching would be a migration project, not a batch.
+- Blueprint says tests are *vitest in `tests/`*; they were **node:test in
+  `src/test/`**. Migrated to vitest (see B0.7) but kept in `src/test/`.
+
+### B0 — Hygiene, CI & security quick wins ✅
+
+- [x] **B0.1 — `npm audit` in CI + Dependabot.** `.github/dependabot.yml`
+      covers all three packages plus github-actions, grouping minor/patch
+      into one PR so majors stay individually reviewable. **All three
+      packages now gate on `npm audit --audit-level=high` and pass at
+      exit 0.**
+      - The React 18 → 19 upgrade below closed the last blocking advisory,
+        so web's audit was promoted from report-only to a real gate.
+      - `drizzle-kit` was upgraded `0.18.1 → 0.31.10`, which cleared the 4
+        high `brace-expansion` advisories. 4 **moderate** dev-only esbuild
+        advisories remain, reached through `drizzle-kit → @esbuild-kit/
+        esm-loader` (a deprecated package the *current* drizzle-kit still
+        ships) — there is no upstream version to move to, and at moderate
+        they don't trip the gate. Noted rather than force-fixed.
+
+- [x] **React 18 → 19 upgrade** (the open item B0.1 previously blocked on).
+      `react@19.2.8`, `react-dom@19.2.8`, `react-router@8.3.0`,
+      `@types/react@19`, `@types/react-dom@19`, `vite@6.4.3`. Result:
+      **`apps/web` audits at 0 vulnerabilities**, dev and runtime.
+      - **Why it was safe:** the app's own source had *zero* React 19
+        breaking patterns — no `ReactDOM.render`/`hydrate`, no
+        `findDOMNode`, no string refs, no `defaultProps`/`propTypes` on
+        function components, no legacy context, no bare `useRef()`. Of ~30
+        React ecosystem dependencies, only two excluded React 19, and
+        **both turned out to be dead weight from the Figma Make export**:
+        `react-popper` + `@popperjs/core` were imported nowhere (MUI 7 uses
+        floating-ui) and were removed; `react-day-picker` was used by
+        exactly one component, `ui/calendar.tsx`, which nothing renders.
+      - `react-day-picker` was upgraded `8 → 10` rather than deleted with
+        its one consumer, because a date picker is very likely wanted by the
+        incoming redesign. `calendar.tsx` was rewritten for the v9+ API
+        (snake_case `classNames` keys → camelCase semantic names, `<table>`
+        → grid so `row`/`cell` became `week`/`day`, and the
+        `IconLeft`/`IconRight` slots collapsed into one `Chevron` slot
+        taking an `orientation`). Verified by typecheck, since
+        `React.ComponentProps<typeof DayPicker>` makes API drift a
+        compile error.
+      - The stale `pnpm.overrides.vite: "6.3.5"` pin was also corrected —
+        left alone it would have silently dragged Vite back to the
+        vulnerable version under pnpm.
+      - **Verified:** 0 type errors, production build succeeds, dev server
+        serves and transforms `main.tsx` through `createRoot`, exactly one
+        React copy in the tree (no duplicate-React hazard), and `19.2.8`
+        is what's actually baked into the built bundle.
+- [x] **B0.2 — timing-safe sync-key comparison.** `central-server`'s
+      `authenticateBranch` compared SHA-256 digests with `!==`, which
+      short-circuits at the first differing character and leaks, via
+      response time, how many leading characters of a guessed key were
+      correct. Now `crypto.timingSafeEqual` over equal-length buffers.
+- [x] **B0.3 — door-lock credentials encrypted at rest.** New
+      `src/lib/secrets.ts`: AES-256-GCM, key derived via **HKDF-SHA256 from
+      the branch's existing RSA signing key** (`data/keys/local_private.pem`
+      — already per-branch, already never leaves the property, so no new
+      secret to manage or back up), with a distinct `info` string so the
+      derived key is cryptographically independent of the signing key.
+      Random IV per call, so two branches sharing a password don't produce
+      identical ciphertext. Versioned `enc.v1.` prefix.
+      - **Transparent upgrade**: `readDoorLockConfigWithSecrets()` decrypts
+        on read and lazily re-writes any surviving plaintext row as
+        ciphertext. Best-effort — a failed re-write logs but does not block
+        the lock command, since refusing would take doors offline over a
+        storage nicety.
+      - Extracted into `services/locks/config.ts` rather than `access.ts` to
+        avoid a genuine import cycle (`access.ts` already imports the
+        adapter; the adapter now needs the decrypting reader).
+      - **Threat model documented in the file**: this defends against a
+        stolen `.db`/backup/offsite replica, *not* full host compromise — an
+        attacker who can read the PEM can derive the key. B17.5 (encrypt the
+        signing key itself) is what closes that.
+      - 8 real tests in `src/test/secrets.test.ts` covering round-trip
+        (incl. unicode/4KB/single-char), non-appearance of plaintext,
+        IV-randomness, legacy-plaintext pass-through, and that a **tampered
+        or malformed blob throws rather than returning corrupted plaintext**
+        (silently-corrupted output would be sent to TTLock as a real login
+        attempt).
+- [x] **B0.4 — request IDs.** `src/lib/requestId.ts`; ID attached to `req`,
+      echoed in the `x-request-id` response header, included in every log
+      line, and **returned in the 500 error body** so a user reporting a
+      failure can quote it. Honours an inbound header so a call chain keeps
+      one ID end-to-end — validated against `/^[A-Za-z0-9_-]{1,64}$/`, since
+      an unbounded client-supplied string that lands in logs is a
+      log-injection vector.
+- [x] **B0.5 — structured JSON logging (pino).** `src/lib/logger.ts` +
+      `pino-http`. Every request line carries request ID, actor (resolved
+      lazily, since `requireAuth` populates `req.auth` after this middleware
+      runs), branch, route, status and duration. 5xx logs at `error`, 4xx at
+      `warn`, so client mistakes don't page anyone. Redaction list covers
+      cookies, auth headers, the sync key, and `password`/`clientSecret`/
+      `accessToken`/`refreshToken`/`pin`/`totpSecret` at any depth —
+      **verified live**: real runs show `"cookie":"[redacted]"` and
+      `"set-cookie":"[redacted]"`. All `console.*` in app/service code
+      replaced; `seed.ts` deliberately keeps `console` (it is a human-facing
+      CLI that prints credentials). Rotation: container stdout via the host
+      log driver, plus an optional `NEXURA_LOG_FILE` transport for
+      bare-metal installs.
+- [x] **B0.6 — explicit body size limit.**
+      `express.json({ limit: "256kb" })` on both servers.
+      - **Two real bugs surfaced while verifying this** — the limit worked,
+        but what happened *after* it fired was wrong:
+        1. A rejected body came back as **500 `INTERNAL_ERROR`**, because
+           body-parser throws and the generic error handler caught it. That
+           blames the server for a client mistake, files a bogus IT-02
+           error-log entry, and logs at `error` level — so routine junk
+           traffic would drown real failures. Both servers now map
+           body-parser's `err.type` to the right status: **413
+           `PAYLOAD_TOO_LARGE`**, **400 `INVALID_REQUEST_BODY`**.
+        2. Those responses carried **no request ID**, because
+           `requestIdMiddleware` had been registered *below* the body
+           parser — silently exempting exactly the requests most worth
+           tracing. Request ID and the HTTP logger now sit above it.
+      - Locked in by `src/test/request-hygiene.test.ts` (6 tests), since
+        both regressions are invisible on any normal request. The
+        header-injection case is driven over a **raw socket**, not `fetch` —
+        `fetch` validates header values itself and refuses to send control
+        characters, so testing it through `fetch` would only prove `fetch`
+        works.
+- [x] **B0.7 — vitest + coverage, replacing node:test.** This also **fixed a
+      real, long-standing blocker**: `tsx --test <glob>` reliably hung dead
+      after the first test file completed on Windows, which had forced a
+      hand-rolled sequential per-file runner (`scripts/run-tests.mjs`, now
+      deleted). Vitest runs each file in its own worker and the hang is
+      gone. Config pins `pool: "forks"` + `singleFork` + no file
+      parallelism, because every test file sets `NEXURA_DB_PATH` at module
+      scope and binds its own HTTP server, so files must not share a
+      process. Coverage via v8 with **no threshold gate** — B0 establishes
+      the baseline, per the blueprint.
+      - **44 tests across 7 files pass in local-server; 6 in
+        central-server.**
+- [x] **B0.8 — `lint:invariants`.** `scripts/lint-invariants.mjs` guards
+      invariant 3. Rather than the blueprint's suggested per-*file* `.run(`
+      count (which would flag a file of ten single-write handlers), it
+      brace-matches each `router.<method>(...)` body, strips any
+      `db.transaction(...)`/`immediateTransaction(...)` block, and counts
+      the surviving `.run(` calls — with a string/comment-aware scanner so a
+      brace inside a literal doesn't derail it.
+      - **It found 20 violating handlers, independently matching the
+        blueprint's own "known offenders" list**: `reservations.ts` check-in
+        (3 writes) and check-out (3), `inventory.ts` PO receipt,
+        `restaurant.ts` order→folio (4 writes). **There are currently zero
+        `db.transaction()` calls anywhere in local-server** — invariant 3 is
+        entirely unimplemented, which is exactly what B3 exists to fix.
+      - Runs as a **ratchet, not a gate**: the 20 are recorded in
+        `scripts/lint-invariants-baseline.json` and only *new or worsened*
+        violations fail CI. A permanently-red build for a known 20 would
+        just be ignored. `--strict` (no baseline) is what B3's DoD turns on
+        once the baseline is empty.
+      - **Verified in all three directions**: a new 2-write handler fails, a
+        new 1-write handler passes, and a new 2-write handler correctly
+        wrapped in `db.transaction()` passes.
+
+**B0 DoD status:** CI green with audit + coverage ✅ · no plaintext lock
+credentials ✅ · every log line carries a request ID ✅. The react-router
+item that was carried forward is now **closed** by the React 19 upgrade
+above — all three packages audit clean and gate on it.
+
+### B1 — Migration system ✅ 🔴
+
+Replaced `init.sql` + the `columnDefaults` self-healer with versioned
+migrations in `src/db/migrations/NNNN_name.sql`, applied by
+`src/db/migrate.ts` before drizzle opens over the connection.
+
+- **`0001_baseline.sql` is init.sql frozen verbatim**, deliberately *not*
+  regenerated from `schema.ts` via `drizzle-kit generate`. init.sql is the
+  schema that has actually been running in production shape — including
+  hand-written indexes and constraint details a regeneration could quietly
+  differ on. A fresh database therefore gets exactly the schema known to
+  work. Verified byte-identical from the first `CREATE` onward.
+- **Custom runner, not drizzle's migrator.** Drizzle's applies pending SQL
+  and records a journal; it does none of the three things shipping to
+  unattended offline properties actually requires:
+  1. **Future-schema guard** — a DB migrated past what the binary knows
+     refuses to start. This is the rollback case: a container reverted to an
+     older build must not run against a newer schema and silently corrupt
+     it.
+  2. **Pre-migration snapshot** via `VACUUM INTO` (WAL-safe, unlike copying
+     the file), recorded in `backup_snapshots` so it appears in IT-04. On
+     failure the existing restore-marker mechanism is staged so the next
+     boot rolls the data back.
+  3. **Baselining** an existing database that predates migrations.
+  `drizzle-kit` is still configured (`drizzle.config.ts`, `npm run
+  db:generate`) for *authoring* new migrations — it just doesn't apply them.
+- **Immutability enforced by checksum.** Editing an already-applied
+  migration refuses to start, because otherwise properties in the field
+  silently disagree about their schema. Checksums normalise line endings so
+  a git `autocrlf` difference doesn't read as tampering.
+- **Each migration runs in its own transaction**, with its
+  `schema_migrations` row committed atomically alongside its DDL — SQLite
+  makes DDL transactional, so a mid-migration failure leaves no partial
+  schema.
+- **The self-healer is gone from the boot path**, but its column map
+  survives inside `migrate.ts` for exactly one purpose: a pre-migration
+  database may be missing columns that later init.sql edits introduced
+  (`CREATE TABLE IF NOT EXISTS` never adds columns to an existing table).
+  Baselining asserts the DB matches 0001, so the reconciliation runs **once**
+  during that adoption to make the assertion true. A database that silently
+  repairs its own shape on every boot can never be reasoned about — that is
+  why it doesn't stay.
+- Failure to migrate is **fatal**. Starting anyway means serving a hotel
+  from a database whose shape the code disagrees with, which produces
+  silently wrong folio balances rather than an outage someone notices.
+- **Schema version is reported** on `/health` (B1 DoD) and in the sync push
+  payload. Central declares the field explicitly rather than relying on
+  zod's strip-unknown-keys, since that file already carries the scar of a
+  payload/schema mismatch that silently 400'd every push; it persists in B20.
+
+**Verified — 13 tests in `src/test/migrations.test.ts`, covering all five the
+blueprint requires plus four more:**
+- Fresh DB applies all migrations and populates `schema_migrations`.
+- Existing DB is baselined **without re-executing 0001** — proven by making
+  0001 a bare `CREATE TABLE` that would error if re-run — then applies only
+  what's pending, with pre-existing rows intact.
+- A migration that creates a table, inserts, *then* fails leaves the DB at
+  the prior version with **no partial DDL surviving** and data untouched.
+- A DB at version N+1 against a binary knowing N **exits non-zero** — driven
+  through a real subprocess, because asserting on the thrown error would
+  miss a regression where the catch block logs and continues.
+- The snapshot is created before the migration, names its target version,
+  and is a **readable database holding the pre-migration state** (not just a
+  non-empty file); a failed migration stages it for restore.
+- Plus: checksum tampering rejected, malformed filenames rejected, duplicate
+  versions rejected, and the real migrations directory loads in order.
+
+**Also verified against a simulated real property**: a legacy DB with real
+org/branch/user/guest rows, no `schema_migrations`, and a deliberately
+dropped `guests.nationality` column booted the *actual* `db/client.ts` —
+baselined at 0001 (`duration_ms: 0`, i.e. not re-executed), reconciled the
+missing column, and kept its data. That adoption path was the single biggest
+risk in this batch.
+
+**B1 DoD:** `init.sql` no longer executes at runtime ✅ (kept as historical
+provenance, with a header saying so) · self-healer deleted from boot ✅ ·
+all five required tests pass ✅ · migration version on a health endpoint ✅.
+
+### B2 — Money → integer kobo ✅ 🔴
+
+Float money is gone. Every money value in the database, in an API request or
+response, and in any intermediate calculation is now an integer count of
+kobo, behind `src/lib/money.ts`.
+
+- **The line this batch existed to delete** was in `services/folio.ts`:
+  `Math.round((totalCharges - totalPaid) * 100) / 100`. It was there purely
+  to paper over float drift when summing naira as doubles. In integer kobo
+  the subtraction is exact, so it is deleted rather than reimplemented.
+- **`0002_money_kobo`** converts 15 columns: add `_kobo` INTEGER, backfill
+  `CAST(ROUND(x * 100) AS INTEGER)`, drop the float. Verified safe first —
+  no index, view, or constraint referenced any of them, and SQLite 3.49
+  supports `DROP COLUMN`. The whole file runs in one transaction.
+  - `branches.tax_rate` became **`tax_rate_bp`** (basis points, 7.5% → 750),
+    because it is a rate, not an amount.
+  - **Six `real()` columns deliberately survive** and the DoD's "zero
+    `real()` columns" is read as "zero *money* columns": stock quantities
+    are genuinely fractional (2.5 kg of flour), and `occupancy_rate` is a
+    percentage. Invariant 2 is about money, not about banning `real()`.
+- **`money.ts`**: `toKobo`/`fromKobo`, `addKobo`/`subKobo`/`mulKobo`,
+  `mulRate`, `valueKobo`, `splitKobo`, `parseNairaInput`, `formatNaira`,
+  basis-point helpers. Non-integer inputs **throw** rather than round —
+  a fractional kobo means a float leaked in upstream, and absorbing it
+  would hide the actual bug.
+  - **Rounds half away from zero, not `Math.round`.** `Math.round(-7.5)` is
+    `-7`, so tax on a −₦100 reversal would not be the exact negative of tax
+    on the +₦100 charge and a fully-voided folio would fail to return to
+    zero. B4 posts corrections as negative rows, so this matters. Proven
+    over 2,000 random amount/rate pairs.
+  - **`valueKobo` is a second, admitted rounding site** alongside `mulRate`.
+    The blueprint says `mulRate` should be the only one, but stock
+    quantities are fractional, so unit price × quantity does not always land
+    on a whole kobo. It is documented rather than contorted around, and
+    integer quantities go through `mulKobo`, which throws instead of
+    rounding.
+- **Boundary conversions are confined to two places**, both commented:
+  central still stores naira floats until B20, so `services/sync.ts`
+  converts on push (`fromKobo`) and on ingest (`toKobo`). Nothing else in
+  the server sees a float.
+- **`lint:invariants` extended for invariant 2**, banning `* 100`, `/ 100`
+  and `.toFixed(2)` outside `money.ts`.
+  - **Narrowed after a real false-positive rate**: the first version flagged
+    six legitimate sites — CPU load, free-memory %, occupancy rate, and two
+    guest-mix ratios. All percentage maths, no money. A linter that cries
+    wolf on correct code gets switched off, so the operators now only fire
+    when the line also mentions something money-shaped (`rate` and `total`
+    are deliberately *not* markers — they were the false positives).
+    Verified it still catches `amountKobo / 100`, `priceNaira * 100` and
+    `.toFixed(2)` while ignoring `Math.round((a / b) * 100)`.
+  - **The invariant-3 baseline was re-keyed** from `file:line:method` to a
+    per-file multiset of write counts. Line keys looked precise but were
+    useless: adding one import shifted every handler and made all 20 known
+    violations read as new.
+- **Frontend converted in lockstep** — 21 screens plus `api.ts`. New
+  `apps/web/src/app/lib/money.ts` mirrors the server's formatting (a
+  deliberate duplicate, not a shared package: these are independently
+  deployed npm packages, and the server's copy is the authority with the
+  tests). Form state still holds naira strings; conversion happens only at
+  the send boundary via `toKobo`.
+
+**Verified:**
+- **The property test the blueprint asks for**: 10,000 random
+  charge/payment sequences reconcile with zero drift, checked against an
+  independent **BigInt oracle** rather than the implementation compared to
+  itself. A companion test proves the float approach it replaces *does*
+  drift on the same data, so the property test cannot be vacuously passing.
+- `splitKobo(10001, 3)` → `[3334, 3334, 3333]`, plus 5,000 random splits
+  that always sum back to the input, negatives included.
+- Migration backfill against a seeded DB with known values: `7.5 → 750bp`,
+  `₦5,000.50 → 500050`, `19.99 → 1999` (the canonical float trap), a NULL
+  pay rate that **stays NULL rather than becoming 0**, and the old float
+  columns confirmed dropped.
+- A schema assertion that no `real()` money column can reappear.
+- **End to end on a real seeded database**: migrations 1 and 2 applied,
+  `/health` reports `schemaVersion: 2`, the API returns `rateKobo: 4200000`
+  and `tax_rate_bp: 750`, and a real folio — 3 nights × ₦38,000 — reconciles
+  to **exactly 0**.
+- 84 local-server tests, 6 central-server, all three typechecks, all three
+  audits, web build.
+
+**B2 DoD:** zero `real()` *money* columns ✅ · no money arithmetic outside
+`money.ts` (linted) ✅ · property test green ✅.
+
+### B3 — Transactions & race elimination ✅ 🔴
+
+All 20 multi-write handlers are now atomic, and double-booking is prevented
+by the database rather than by application logic. **`lint:invariants` is
+clean at `--strict`** and the baseline file is empty, so the npm script and
+CI now enforce it permanently — a new un-atomic handler fails the build.
+
+- **`0003_room_night_inventory`** — one row per room per night, `UNIQUE
+  (room_id, stay_date)`. That index is the actual guarantee; the overlap
+  query that remains in the route is only there to produce a friendlier
+  error a moment earlier. Check-out and room-change release the nights so
+  the room is immediately rebookable.
+  - Checkout day is **not** a night, which is what keeps same-day turnovers
+    legal — covered by its own test.
+  - The backfill walks each existing reservation's nights with a recursive
+    CTE, excluding cancelled/no-show (they don't occupy a room), and uses
+    `INSERT OR IGNORE` because historical data predates the constraint and
+    may contain genuine overlaps — the migration must not fail on a mess it
+    inherited. Verified against real seeded data: nights held exactly equal
+    checkout − checkin for every live stay, and zero for cancelled/no-show.
+- **`src/db/tx.ts`** — `transaction()` and `immediateTransaction()`.
+  IMMEDIATE is used for every check-then-write: a deferred transaction
+  starts in read mode and only takes the write lock at the first write,
+  leaving a window where two callers both read "available".
+  - **Verified drizzle's semantics before relying on them**, rather than
+    assuming: a helper that writes via the shared `db` handle (`logAudit`,
+    `folioSummary`, the lock queue) *does* join the transaction and roll
+    back with it. That is why the callbacks use `db` and not the `tx`
+    handle — threading `tx` through would create two names for one
+    connection and tempt someone to "fix" the helpers, while the current
+    shape means an audit row for an operation that then failed cannot
+    survive.
+  - The blueprint writes `db.transaction(() => {...})()`; that is
+    better-sqlite3's raw API. Drizzle's wrapper runs the callback directly,
+    so there is no trailing `()`.
+- **`HandlerError`** (`src/lib/handlerError.ts`) — inside a transaction there
+  is no way to `return res.status(409)`, because returning commits the very
+  work being rejected. Validation discovered mid-transaction throws with its
+  HTTP status attached and is mapped to a response outside. Without this the
+  tempting shape is to check everything *before* `BEGIN` and only write
+  inside, which is precisely the race this batch removes.
+- **Every check-then-write now re-reads inside the transaction** — check-in
+  re-reads room *and* reservation status, PO receipt re-reads the PO status,
+  order close re-reads whether it is already closed, leave-decide re-reads
+  "still pending". Taking the lock does not make a read from before the lock
+  true.
+- **Check-out keeps a short payment while refusing to release the room.**
+  The guest genuinely handed over that cash, so rolling it back would lose a
+  real payment. The transaction therefore *returns* an outcome rather than
+  throwing — returning commits, banking the payment either way, and only
+  the release-the-room half is conditional.
+- **Found and fixed while verifying**: `seed.ts` writes reservations
+  directly rather than through the routes, so a freshly seeded database had
+  6 reservations holding rooms but **zero** room-night claims — the guard
+  would have let the API rebook demo-occupied rooms. The seed now claims
+  nights, applying the same cancelled/no-show exclusion as the migration.
+
+**Verified — `src/test/concurrency.test.ts`, 6 tests:**
+- **50 concurrent bookings of the same room and dates: exactly one succeeds,
+  49 get 409**, and the database agrees — 3 nights held, all by one
+  reservation.
+- **20 concurrent check-ins on one reservation: exactly one succeeds**, and
+  the guest is billed for the room **exactly once** (the real damage from a
+  double check-in is a duplicated charge, so the assertion is on the ledger,
+  not the status code).
+- A test that bypasses the route entirely and inserts a duplicate room-night
+  straight into the table, asserting `SQLITE_CONSTRAINT_UNIQUE` — so this
+  fails if anyone ever "optimises away" the constraint and leaves only the
+  overlap query.
+- Same-day turnover still allowed.
+- Injected failure after check-in's first two writes leaves reservation,
+  room and folio **all** unchanged; the same for a PO receipt mid-way.
+
+> **Honest note, stated in the test file itself:** better-sqlite3 is
+> synchronous and Node is single-threaded, so 50 in-flight requests do not
+> execute *simultaneously* the way they would against Postgres — they
+> interleave only where a handler yields. The tests are still meaningful:
+> the unique index genuinely rejects the second insert, several handlers on
+> this path really are async, and the atomicity halves hold regardless of
+> threading. Where a test proves something weaker than its name suggests,
+> the file says so rather than implying stronger coverage than exists.
+
+**B3 DoD:** `lint:invariants` clean ✅ (now `--strict`, baseline empty) ·
+concurrency tests green ✅ · every write handler transactional ✅.
+
+### B4 — Append-only ledger, voids & reversals ✅ 🔴
+
+`folio_charges` and `payments` are now immutable. A correction is a **new
+negative row** pointing back at the original, so a folio shows both what was
+charged and that it was unwound — the difference between an auditable ledger
+and one where mistakes quietly disappear.
+
+- **`0004_ledger_append_only`** adds `reversal_of_id`, `is_reversal`,
+  `reversed_amount_kobo`, `voided_at/by`, `void_reason_code/note` and
+  `business_date` to both tables, plus four triggers.
+- **The triggers are the actual guarantee.** Application discipline can be
+  undone by the next person who writes an `UPDATE`; the point of an
+  append-only ledger is that the database refuses regardless. They allow
+  exactly one mutation — stamping void metadata onto a line that is not yet
+  voided — and forbid changing `amount_kobo`, deleting, or touching an
+  already-voided row. That last clause is what prevents **un-voiding**: once
+  a line is struck, the only way to move the balance again is another
+  visible row.
+- **Partial voids drove a real design constraint.** `voided_at` is set only
+  on a *full* void, because the trigger locks a row the moment it is set —
+  stamping it on a partial void would make the remaining 60% impossible to
+  void later. `reversed_amount_kobo` accumulates instead, and a partially
+  voided line stays live.
+- **`folioSummary` needed no change at all.** Reversals are negative rows, so
+  they net out of `sum(charges) − sum(payments)` naturally. Nothing is
+  filtered anywhere — a folio that hides its reversals is precisely what this
+  batch exists to prevent.
+- **Permissions**: new `folio:void` and `finance:reports`. `folio:void` is
+  deliberately **not** in the Front Desk set (it is the most abusable action
+  in the app) — it goes to FIN, RO, and the three wildcard roles. The
+  blueprint writes these `folio.void` / `finance.reports`; this codebase has
+  used `module:action` since HR-03, so they keep that shape.
+- **`business_date`** is stamped on every financial row (invariant 9) behind
+  `lib/businessDate.ts`. B5 replaces the derivation with the branch's real
+  rolling business date; putting it behind a function from day one means
+  that change happens in one place rather than hunting `new Date()` calls.
+- **`GET /reports/reversals`** groups by operator, which is what makes it a
+  fraud-detection view rather than a curiosity: one person voiding far more
+  than their colleagues is the signal, and it is invisible in a flat
+  chronological list. Void reasons are a controlled list for the same
+  reason — you cannot group by a free-text sentence.
+
+**Verified — `src/test/ledger.test.ts`, 15 tests:**
+- Direct `UPDATE` of a posted amount, and direct `DELETE`, are both rejected
+  by the database — tested by **bypassing every route and service** and going
+  straight at the table, so this fails if the triggers are ever dropped.
+- A fully voided line cannot be edited again (no un-voiding).
+- Full void → reversal row with the opposite sign, balance to zero, and the
+  original still carrying its **original amount**.
+- **Partial void of 40% leaves 60% outstanding**, does not set `voided_at`,
+  and the remainder can still be voided afterwards.
+- Over-voiding, double-voiding, `other` without a note, and an unknown reason
+  code are all refused.
+- Voiding a payment puts the debt back.
+- Front Desk gets 403 **and writes no rows** (asserted by row count, not just
+  the status code).
+- The reversal report groups by operator with a per-reason breakdown, and
+  requires `finance:reports`.
+
+**Also found and fixed while verifying:** the OpenAPI generator had silently
+skipped the whole new route file, because its import regex did not match
+`import x, { y } from ...`. Fixing that exposed a second problem — the
+generator maps one router per file, so mounting two routers from
+`folios.ts` emitted every folio path a second time under `/reports`. The
+reversal report moved into `reports.ts` where every other report lives, and
+the generator now **warns on an unresolved mount and hard-fails on a
+duplicate one**, so the silent-skip cannot recur. Spec back to valid: 150
+endpoints, 0 errors, the same 2 accepted warnings.
+
+**B4 DoD:** triggers active ✅ · no code path updates or deletes a posted
+financial row ✅ (enforced by the database, not convention) · reversal report
+available ✅.
+
+### B5 — Business date & night audit ✅ 🔴
+
+The last load-bearing batch. The system now has a real trading day: a
+per-branch `current_business_date` that only advances when the night audit
+rolls it, a day-close routine, and frozen `daily_revenue` rows every report
+reads from.
+
+- **The business date is stored, not derived.** A hotel's day ends when the
+  audit runs (~03:00), not at midnight — a drink sold at 01:30 belongs to the
+  previous trading day. Deriving it from the clock would mean the day
+  silently advances at midnight while the audit hasn't run, and the two
+  disagree. `expectedBusinessDate()` compares the two to work out how many
+  days are due.
+- **A REAL BEHAVIOUR CHANGE, and the most consequential thing in this
+  batch:** check-in used to post the **whole stay** as one folio line the
+  moment the guest arrived — always flagged in the code as a stand-in for
+  "real PMS behavior (nightly auto-posting)". This is that refinement.
+  Posting the whole stay up front put a 5-night stay entirely into the
+  arrival day's revenue, so occupancy said 1 room-night while revenue said 5
+  and **nothing reconciled**. Now one night posts per night, stamped with
+  that night's business date. Leaving both would have double-billed every
+  guest, so check-in no longer posts room charges at all.
+  - **The gap that opened, and how it's closed:** a guest who checks in and
+    leaves before any audit runs would have been billed nothing for the
+    room. Check-out now settles any un-posted nights
+    (`postOutstandingRoomNights`), so the total owed is identical to before —
+    just posted at the right time and attributed to the right nights.
+- **Six steps, idempotent and resumable.** Each records its own completion in
+  `steps_json`, and every write is keyed so a repeat is a no-op — a night
+  audit that double-posts when someone clicks twice is worse than one that
+  doesn't run. Room-charge idempotency key: (reservation, business_date,
+  category "Room").
+- **One transaction per date, never one across several.** If the server was
+  off three days, three days are audited in sequence and each commits on its
+  own. Batching them means a failure on day three silently discards days one
+  and two with no way to tell how far it got.
+- **`daily_revenue` is frozen** by the same trigger discipline as B4's
+  ledger. Reopening a day **supersedes** the row (`superseded_by_run_id`)
+  rather than editing or deleting it, and the reopen is itself a run record
+  with an operator, timestamp and reason.
+- **Sync KPIs now source from `daily_revenue`** (B5 DoD): a *closed* day is
+  read back verbatim so a late void can't make central's number drift from
+  what the property reported; the still-open day is computed live using the
+  same function the audit will use to freeze it, so there is one definition
+  of "a day's revenue" rather than two.
+- **Scheduler**: a 15-minute tick, not `node-cron` — the requirement is
+  "check whether the day is due", which needs no new dependency, and the
+  audit's idempotency makes an extra check free. Disableable via
+  `NEXURA_DISABLE_NIGHT_AUDIT_SCHEDULER=1` for tests.
+- **`lint:invariants` gained invariant 9**: every insert into
+  `folio_charges`/`payments` must set `businessDate`. A row without one drops
+  out of `daily_revenue` and the day stops reconciling — the exact failure
+  the 30-day test catches, now caught at edit time instead.
+
+**Honest gaps, recorded as real step statuses rather than omitted:**
+`close_pos_day` reports **`not_applicable`** (cash drawers are B15); no-show
+penalties are **not posted** (`penalty_charge_id` stays null — the amount
+comes from B9's cancellation-policy engine, and inventing one would be worse
+than posting none); tax and discounts/comps report **0** rather than an
+estimate, because B6's engine posts tax as its own ledger rows and a guessed
+figure would tie to no line. A run's step list is therefore an accurate
+account of what this build actually does.
+
+**Verified — `src/test/night-audit.test.ts`, 10 tests:**
+- **The 30-day reconciliation**: a simulated month of 10 overlapping stays
+  across 5 rooms — arrivals, multi-night stayovers, departures and a no-show
+  — closed day by day. `sum(daily_revenue.room_revenue)` equals the ledger's
+  room charges **exactly**, and each frozen day ties to its own night's
+  charges with ADR derivable from the same row.
+- ADR/RevPAR/occupancy against hand-computed values (3 rooms, 2 sold at
+  ₦50,000 and ₦30,000).
+- Running the audit twice for one date posts **no duplicate charges**.
+- Server off 3 days → the next run posts all 4 nights, in order, and creates
+  **one run row per date** (proving each committed independently).
+- Business date only moves when the audit rolls it; before the roll hour the
+  trading day is still yesterday's.
+- `daily_revenue` cannot be edited or deleted.
+- A confirmed arrival that never checked in becomes a no-show and is
+  recorded.
+
+**Two of my own test fixtures were wrong, not the code** — both caught by
+this suite: passing `now` as *midnight* meant the fixture was before the 3am
+roll hour, so one fewer day was due than the test assumed. The roll-hour
+logic was behaving exactly as its own dedicated test asserts.
+
+**B5 DoD:** business date on every financial row ✅ (lint-enforced) ·
+ADR/RevPAR derived from `daily_revenue` ✅ · 30-day reconciliation green ✅ ·
+sync KPI payload sources from `daily_revenue` ✅.
+
+---
+
+### Backend Blueprint B6 — Tax engine 🔴 (migration 0006)
+
+**The setting was decorative.** `branches` has carried `tax_name` /
+`tax_rate_bp` / `tax_inclusive` since Phase 1, Settings → Hotel Configuration
+edits them, and **nothing ever read them**. A property could set "VAT 7.5%,
+Exclusive", watch it save, and no guest was ever charged a kobo of VAT. Worse,
+the rate did not even persist: the screen sends `taxRate` as a percentage
+while the column is `tax_rate_bp`, so the spread in `POST /settings/branch`
+wrote a key no column matches and drizzle dropped it silently. A Nigerian
+hotel that doesn't charge VAT isn't leaving money on the table, it is
+non-compliant with FIRS.
+
+Both halves are fixed, and migration 0006 carries each branch's existing
+configuration forward into a real `tax_codes` row — a straight port, not a
+new policy: whatever the property configured is what it now charges.
+
+- **`computeTax` is the only tax calculation in the system**
+  (`services/tax/engine.ts`), and `postChargeWithTax`
+  (`services/tax/posting.ts`) is the only thing that writes a folio charge.
+  Every posting path routes through it — night-audit room charges, manual
+  folio charges, restaurant orders.
+- **Tax posts as separate rows, never folded into the base.** A taxed charge
+  is a `base` row plus one `tax`/`service_charge` child per code, each
+  carrying `parent_charge_id` and `tax_code_id`. A blended number can't be
+  reported per jurisdiction, can't be exempted, and can't be reversed
+  independently — and the guest needs the breakdown on the folio.
+- **Ordering and compounding are explicit.** Codes apply by
+  `computation_order`; a code that compounds on others includes their amounts
+  in its base. Nigeria's service charge is applied first and is itself
+  VAT-able — that's this mechanism, not a special case. A code may only
+  compound on one computed *earlier*; the API refuses the reverse, because
+  the engine is a single forward pass and a backward reference would silently
+  contribute zero.
+- **Inclusive pricing is exact by construction.** `solveInclusiveBase`
+  estimates the base from money.ts's closed form, then confirms it with the
+  same exact forward pass used for posting, and any residual kobo lands on
+  the last inclusive line. Base + tax equals the price the operator typed for
+  **every** amount — verified exhaustively for all 10,000 amounts from ₦0.01
+  to ₦100.00, and for a compounding inclusive pair where the closed form
+  alone is not exact.
+- **Rates are effective-dated.** A rate change is a **new row**, not an edit
+  (`PATCH` closes the old one and opens a new one), so reprinting last
+  month's invoice produces the number the guest actually paid. Back-dating a
+  change is refused. Rates resolve against the **business date**, not the
+  wall clock.
+- **Voids cascade.** Reversing a ₦50,000 room night now also reverses its
+  VAT — proportionally on a partial void, sweeping the remainder on the void
+  that closes the charge, so repeated partial voids still land on exactly
+  zero. A tax line cannot be voided on its own (409): that would leave the
+  base charge standing untaxed, which is a different bill.
+- **Revenue is net of tax.** `daily_revenue.room_revenue` excludes tax lines
+  and `tax_collected` sums them, so ADR and RevPAR stop being overstated by
+  7.5%. A service charge stays in revenue — it is the property's own charge,
+  remitted to nobody.
+- **`lint:invariants` gained a fourth rule**, and it is what makes the DoD
+  ("no posting path bypasses the engine") enforceable rather than
+  aspirational: any `db.insert(folioCharges)` outside `services/tax/posting.ts`
+  fails the build. Three documented exceptions — the helper itself,
+  `services/ledger.ts` (reversals mirror already-taxed rows), and `seed.ts`
+  (dev fixtures). Verified by injecting a bypass and confirming exit 1.
+- **`settings:tax` is a new permission**, separate from `settings:branch`: a
+  tax rate is a financial control, not an IT one. The tax fields on the Hotel
+  Configuration screen now require it too, so the ability to edit check-out
+  times no longer carries the ability to change the VAT rate.
+
+**Not seeded, deliberately:** state consumption tax and service charge. The
+blueprint lists both in its Nigerian default set, but consumption tax varies
+by state and a service charge is a property's own commercial policy — adding
+either on the operator's behalf would start billing guests for something
+nobody configured. Both are added through `POST /settings/tax-codes`.
+
+**Two real bugs found by live verification, not by tests:**
+1. **A tax code added today didn't apply to today's charges.** `effective_from`
+   defaulted to the wall clock, but charges are effective-dated against the
+   business date — midnight of the trading day — so a code created at 11:32
+   was stamped later than every charge posted that same day. Adding a service
+   charge and immediately posting produced no service charge, with nothing on
+   screen to explain it. Now defaults to the start of the current trading day
+   (and a rate *change* to the start of the next). Locked in by a test.
+2. **Permissions added after a database exists never reach it — and this was
+   not only B6's problem.** `SYSTEM_ROLE_SEED` is applied only when the roles
+   table is empty; afterwards the rows are the live, operator-editable source
+   of truth and boot never overwrites them (correct — a manager's edit must
+   not be reverted on restart). Checking the dev database against the seed
+   showed **B4's `folio:void` never reached Finance or the Resident Officer,
+   and B5's `finance:reports` / `finance:reopen_day` never reached Finance**.
+   On any upgraded property, voiding a charge and reopening a day — both
+   shipped as "complete" — were reachable only by the two roles holding `*`.
+   Migration 0006 repairs all of them additively (nothing is ever removed,
+   `*` roles untouched, custom roles untouched), and the rule is now recorded
+   at the top of `SYSTEM_ROLE_SEED`: **a new permission key needs a matching
+   additive UPDATE in that batch's migration.** There is no automated guard
+   for this yet — catching it would need a historical seed snapshot to diff
+   against, which does not exist.
+
+**Verified — `src/test/tax.test.ts`, 25 tests:**
+- **The worked example, line by line**: ₦50,000 room + 10% service + 5%
+  consumption + 7.5% VAT → ₦61,875.00, with each line's taxable base
+  asserted, matching the hand calculation in the file header.
+- Inclusive round-trip (₦50,000 incl. 7.5% → ₦46,511.63 + ₦3,488.37), plus
+  the exhaustive 10,000-amount sum-back check.
+- Compounding order change alters the total by exactly 7.5% of the service
+  charge; category applicability; effective dating across a rate change.
+- Exemptions suppress only the exempted code; a long-stay exemption applies
+  from the reservation itself without anyone claiming it.
+- Void cascade: full (folio returns to exactly zero), proportional partial,
+  three uneven partials still landing on zero, and a direct tax-line void
+  refused.
+- Night audit with tax: revenue net, `tax_collected` populated, and the
+  frozen day tying to the ledger with every posted kobo classified as either
+  revenue or tax.
+- Endpoints: the worked-example endpoint over HTTP, the property-settings
+  write-through, rate versioning, back-dating refused, compound-order
+  refused, and both permission boundaries.
+
+**A test of mine was measuring its own random number generator.** The
+1,000-amount rounding test used a textbook LCG and read its low bits; the
+sample never once hit an amount whose tax lands on an exact half kobo (0 of
+1,000, against ~25 expected) and reported 73 kobo of drift — eight standard
+deviations out, from the generator rather than the engine. Switched to
+mulberry32. The blueprint asks for per-line and aggregate tax to agree
+"within one kobo"; **they cannot**, and the test now says why instead of
+asserting a threshold that happens to pass: 1,000 independent roundings give
+an arithmetic bound of 500 kobo, non-tie roundings cancel (σ ≈ 9), and the
+~25 exact-half cases round away from zero by policy for +12 expected. What
+matters for a folio is the per-line assertion — every guest is charged the
+correctly rounded tax on their own charge; nobody is ever billed the
+aggregate.
+
+**B6 DoD:** no posting path bypasses the engine ✅ (lint-enforced) · tax lines
+are separate rows ✅ · worked-example endpoint matches the hand calculation ✅
+(asserted in-process and over HTTP, and run live).
+
+---
+
+### Backend Blueprint B7 — Document numbering & invoicing (migration 0007)
+
+**What gaplessness is actually for.** An invoice number is what an auditor
+reconciles against. "Where is ABU-INV-2026-00047?" has exactly two acceptable
+answers: *here it is*, or *it was voided, here is the void record and the
+reason*. "A transaction rolled back so the number was never used" is not one
+of them — it is indistinguishable from a deleted invoice.
+
+- **The number is allocated inside the same transaction as the document.**
+  `allocateNumber` deliberately does *not* open its own transaction: doing so
+  would commit the bump independently and reintroduce exactly the gap it
+  exists to prevent. Every caller wraps it in `immediateTransaction`, and the
+  UNIQUE index on `(branch_id, invoice_number)` is the backstop.
+- **A voided number is never reused.** The row keeps its number forever, with
+  the void reason attached. The obvious alternative — `MAX(number) + 1` at
+  insert time — fails both ways: it races into duplicates, and it silently
+  reuses the number of a voided top-most document.
+- **The prefix carries the branch code** (`ABU-INV-2026-`), so numbers are
+  unique estate-wide with no central coordination — which matters because a
+  branch issues documents while offline and cannot ask anyone what comes next.
+- **An invoice is a snapshot, not a report.** Lines copy the folio charges as
+  they stood at issuance and never change. Rendering them live from the folio
+  is less code and is wrong: a reversal posted next week would silently change
+  a document the guest already holds and possibly paid. Corrections produce a
+  **credit note** — its own numbered document referencing the invoice it
+  reduces. There is a test that voids a folio charge after issuance and
+  asserts the invoice total does not move.
+- **Void vs credit note is enforced, not advisory.** An invoice with payments
+  recorded against it *cannot* be voided (409 `INVOICE_HAS_PAYMENTS`) — that
+  would leave a receipt pointing at a document claiming it was never valid.
+- **An invoice payment reaches the folio, not just the invoice.** The folio is
+  the ledger; a payment recorded only against the invoice would leave the
+  guest's balance overstated and the day's takings understated.
+- **One receipt per payment**, enforced by a UNIQUE index as well as a check —
+  two receipts for one payment is how a payment gets counted twice in a cash
+  reconciliation.
+- **`next_number` is not editable.** Forward leaves a permanent gap, backward
+  guarantees a duplicate. The prefix is editable only while the series is
+  unused (409 `SEQUENCE_IN_USE` once anything is issued), because two
+  different-looking numbers sharing one sequence position read as two
+  documents when only one exists.
+- **The FIRS e-invoicing seam B6 promised exists** (`firs_einvoice_status`,
+  `firs_submission_ref`). **Nothing submits yet** — that needs a live FIRS
+  integration and credentials, which is not something to fake. The columns are
+  there so issuance does not have to be altered later, and their null state is
+  honest: "never submitted".
+
+**A gap found while testing, not by design:** `PATCH /settings/document-sequences`
+first 404'd for a type with no row yet. Two of the six types (complaint, trip)
+are created on first use, so that made their prefix permanently unsettable —
+and configuring an unused series is the *only* moment a prefix can safely be
+set. It now creates the row, and `GET` lists all six with a `configured` flag
+so the screen can offer them.
+
+**Verified — `src/test/documents.test.ts`, 21 tests.** The concurrency
+requirement is tested **twice**, because the two versions prove different
+things and neither is enough alone:
+
+1. **Real OS-level concurrency**: 8 worker threads, each with its own SQLite
+   connection to the same file, allocating 200 numbers. They genuinely
+   contend. Result: exactly 1..200, no gaps, no duplicates, and the sequence
+   ends exactly where the allocations did. This is the test that would catch a
+   missing `BEGIN IMMEDIATE`. What it *cannot* do is load the TypeScript
+   service, so it executes the same SQL sequence `allocateNumber` performs.
+2. **Through the real service over HTTP**: 100 invoices issued from 100
+   folios, asserted sequential with no gaps or duplicates. These interleave
+   rather than truly run at once (better-sqlite3 is synchronous, Node is one
+   thread) — the honest scope note is in the test. What it proves is that the
+   actual code path allocates from the sequence and commits the number with
+   the document.
+
+Plus: a failed transaction consumes no number; void preserves the number,
+blocks payment, and releases the charges for a corrected invoice; a credit
+note reduces the balance while leaving the invoice total untouched;
+over-crediting and over-paying are refused; front desk can issue but not void
+or credit; housekeeping can do neither.
+
+**B7 DoD:** gapless sequences under concurrency ✅ (proven with real threads) ·
+invoices reconcile to folio charges ✅ · credit-note path complete ✅.
+
+---
+
+### Backend Blueprint B8 — Room types, rate plans & availability (migration 0008)
+
+**Two things that were improvised became real: what a room costs, and whether
+one is free.**
+
+*Rates were hand-typed.* `POST /reservations` took `rateKobo` from the client
+and stored whatever arrived, so the price of a room was whatever the last
+person to touch the form said it was. No rate card, no seasonal pricing, no
+way to answer "what does a Deluxe cost on the 14th?" without asking someone,
+and nothing to tell ₦4,500 from a mistyped ₦45,000.
+
+*Availability was a reservation scan.* That answers "is THIS room free?" but
+not "how many Deluxe can I still sell on the 14th?" — the question a booking
+engine actually asks — and it gets slower every month the property operates.
+
+- **Availability is a counter, incremented in the booking transaction.**
+  `inventory_calendar` holds one row per (type, night); `claimInventory` runs
+  inside the same `immediateTransaction` as the reservation insert, so the
+  count and the bookings cannot disagree. That is what a nightly recount job
+  would otherwise be papering over.
+- **The two inventory tables are not redundant.** `room_night_inventory` (B3)
+  is per ROOM per night with a UNIQUE index — a *guarantee*.
+  `inventory_calendar` is per TYPE per night as a count — an *answer*. The
+  first makes double-booking impossible; the second makes "how many left?"
+  cheap. Both are needed.
+- **Rate resolution order: explicit calendar row → derived → type base rate.**
+  Each step exists because the one before can be legitimately absent. A
+  derived plan (`Corporate = BAR less 15%`) stores **no rates** and computes
+  at read time — storing them means a base-rate change silently leaves every
+  derived plan on yesterday's price, which nobody notices until a corporate
+  client queries an invoice.
+- **A missing rate resolves to `null`, never `0`.** Zero is a real price (a
+  comp), so using it for "unknown" would sell rooms free. An unpriced night is
+  a quote blocker and a booking is refused with `NO_RATE_FOR_DATE`.
+- **Quotes run the same code as postings.** `quoteStay` calls `resolveRate`
+  and `computeTax` — the B6 engine every posting path already uses. A quote
+  computed a second, independent way is one that eventually disagrees with the
+  bill by a kobo, and the guest is the one who notices.
+- **Oversell is permitted but never silent.** Selling past `total_rooms` needs
+  an explicit `overbooking_limit`; the response carries `warning: "OVERSOLD"`
+  and the dates. `sold` is not editable through the API at all — a settings
+  screen that could set it by hand would be a way to make the counter disagree
+  with the reservations it counts.
+- **Stop-sell is distinct from sold-out.** A stop-sell night still reports its
+  real availability; it is a commercial decision, not a capacity fact, and
+  conflating them hides which one is happening. A stop-sell on a base plan
+  closes the night for every plan derived from it.
+- **The horizon extends nightly** as night-audit step 4b, and refreshes
+  `total_rooms`/`out_of_order` on **future** nights only — a past night's
+  total is a historical fact, and rewriting it would change occupancy already
+  frozen into `daily_revenue`.
+
+**Backfill (an operating property, not a clean slate):** one room type per
+distinct `rooms.type`, base rates seeded from what that type was *actually
+last sold at*, every room assigned, a `BAR` base plan per branch,
+`rate_calendar` seeded from the rates real reservations were charged, 400 days
+of `inventory_calendar` from live room counts, and `sold` reconciled against
+existing bookings so availability is right from the first request.
+
+**A real bug found while wiring the counter:** the night audit's no-show
+handler only set `status = "no_show"`. The guest's room stayed claimed in
+`room_night_inventory` for the entire original date range, so **a room nobody
+turned up for could not be resold** for the rest of what would have been their
+stay. Both inventories are now released.
+
+**An API contract I broke and then fixed properly.** Replacing the
+reservation-scan conflict check changed `ROOM_CONFLICT` (with
+`conflictingReservationId`) into `ROOM_UNAVAILABLE` — caught by an existing
+test, which is what that test is for. The fix reads the conflicting
+reservation id out of `room_night_inventory` itself, so the contract is
+preserved *and* improved (it now carries the exact conflicting nights too),
+with still no reservation scan.
+
+**Verified — `src/test/availability.test.ts`, 23 tests:** availability
+reflects a booking immediately across the whole range and no further (checkout
+day is not a night); availability is proven to come from the calendar alone by
+inserting a reservation whose nights are *not* in the counter and asserting it
+changes nothing; a sold-out night blocks the whole stay naming the dates;
+stop-sell blocks while rooms remain physically free; the overbooking limit
+permits a controlled oversell, warns, and is itself a hard limit; inventory
+cannot be blocked below what is already sold; the derived plan follows a base
+rate change (₦50,000→₦60,000 less 15% = ₦51,000); a derivation cycle is
+refused; the quote matches `computeTax` line for line **and** matches what the
+night audit actually posts to the folio; an unpriced night blocks rather than
+sells free; the bulk editor applies to a weekday subset in one transaction;
+the horizon extends forward without rewriting history.
+
+**Two of my own test fixtures were wrong again, not the code** — June 2026
+starts on a Monday so it has 8 Friday/Saturday nights, not 9; and several
+tests used Finance to book rooms, which the role deliberately cannot do.
+
+**B8 DoD:** no code path derives availability by scanning reservations ✅ ·
+quotes match posted charges ✅ (asserted end-to-end through a real night
+audit).
+
+---
+
+### Backend Blueprint B10 — Reservation lifecycle endpoints (no migration)
+
+**The batch that unblocks the largest block of unwired UI.** Eleven endpoints,
+no schema change — B8 already built the tables these operate on.
+
+- **One service owns the risky part.** A date change, a type change, a room
+  move and an extension are the same operation underneath — give back what
+  the stay holds, then take what it now needs — and every one touches **two**
+  inventories (`room_night_inventory`, the per-room guarantee, and
+  `inventory_calendar`, the per-type count). So they all go through
+  `rebookReservation`, inside the caller's IMMEDIATE transaction. If the two
+  ever came apart the symptom would not be an error; it would be a room that
+  looks free and is not, found by a guest at the desk.
+- **Release-then-claim, and the order is load-bearing.** Extending a stay in
+  the same room would otherwise conflict with itself, because the nights it
+  already holds are the nights it is asking for. A failed re-claim rolls the
+  release back with it, so a refused extension leaves the stay holding exactly
+  what it had.
+- **Arrivals, departures and the assignment board default to the BUSINESS
+  date**, not the wall clock (invariant 9). At 01:30 with a 3am roll hour the
+  trading day is still yesterday's, and the night porter working that list
+  needs yesterday's arrivals — switching at midnight would lose the guests
+  still due in.
+- **Cursor pagination, not `?page=`.** Offset paging re-runs the query and
+  skips N rows, so a reservation created while a clerk is on page 1 pushes one
+  row off the bottom onto page 2 — a guest seen twice, or worse, one never
+  seen. Every cursor is `(sortValue, id)`: timestamps and names collide, ids
+  do not, so the pair is a total order even when the visible column is not.
+- **`walk-in` is a single transaction**: guest → reservation → room assignment
+  → check-in → first night posted with tax → deposit. The same sequence as
+  five API calls from a browser fails halfway about as often as the network
+  does, and the desk is then left repairing records by hand with a guest
+  waiting.
+- **`assign-room` refuses a different room type unless `allowTypeChange` is
+  passed**, and when an upgrade does happen the booked type moves with the
+  room so inventory stays truthful. The rate implication is **reported, not
+  applied** (`indicativeRateKobo`) — what a guest pays after an upgrade is a
+  commercial decision, not an arithmetic one.
+- **`extend` does not bill the added nights.** The night audit posts one night
+  per night against the reservation's rate (B5), so charging them here would
+  double-bill — the same trap B5 fixed at check-in.
+- **`no-show` releases both inventories** and reports `penaltyPosted: false`
+  with `penaltyPending: "B9 cancellation-policy engine"`. The blueprint says
+  this endpoint "posts penalty"; the amount comes from a policy that does not
+  exist yet, and charging a real guest an invented figure would be worse than
+  charging nothing.
+- **`GET /:id` resolves what FD-01 actually renders** — guest, room, type,
+  plan, folio, credentials, invoices, history — with `access_credentials`
+  selected by **named columns**, because that table carries the raw TTLock API
+  response for debugging and a reservation detail view is no place to hand
+  that to a browser.
+
+**Verified — `src/test/front-desk.test.ts`, 21 tests**, including the
+blueprint's five: an extension refused for an unavailable night leaves
+availability *byte-identical* to before; a date change frees the old nights and
+takes the new ones in both inventories atomically; a walk-in that fails
+part-way leaves no guest, no reservation, no charge and no deposit; a room move
+updates both inventories, flips the vacated room to `cleaning`/`dirty`, and
+writes an audit row carrying the reason; and the arrivals list follows the
+branch's business date, moving when the trading day rolls rather than when the
+system clock does.
+
+**Two of my own test fixtures were wrong again** — one asserted room-night
+claims on a booking made without a room (a type-only booking holds none), and
+one counted other tests' rows as leaked records because the test database is
+shared across a file. Both were the test misreading the system, not the system
+misbehaving.
+
+**Honest note in the walk-in rollback test:** the deposit insert has no failure
+mode that can be triggered without mocking, so the test forces the failure at
+the inventory-claim step instead — which still runs *after* the guest, the
+reservation and the room-night claim have all been written. The test says so
+rather than implying it proved something stronger.
+
+**B10 DoD:** every listed endpoint exists ✅ · all list endpoints paginated ✅
+(one shared cursor helper) · race/atomicity tests green ✅.
+
+---
+
+### Execution Plan Phase 0 — the leftovers (no migration)
+
+Cleared after reading all five planning documents together for the first time.
+`Nexura-Execution-Plan.md` is the master; the Backend blueprint I had been
+executing is one of **two** build tracks, and Phase 0 belongs to neither.
+
+- **0.5 — deleted five unused dependencies**: `@mui/material`,
+  `@mui/icons-material`, `@emotion/react`, `@emotion/styled`, `react-slick`,
+  `react-responsive-masonry`. 55 → 49 direct dependencies. Verified zero
+  imports across `src/`, `index.html` and `vite.config.ts` before removing.
+  **A correction to the plan, measured rather than assumed:** Doc 5 calls this
+  "the single largest first-load win available". It is not — the bundle is
+  **byte-identical** before and after (1,211.15 kB, 2,365 modules, same
+  content hash), because Vite was already tree-shaking packages nothing
+  imported. The real wins are install/CI time and a smaller supply-chain
+  surface. The actual first-load problem is elsewhere: **every one of the 80
+  screens is eagerly imported — zero `React.lazy` in the app** — which is a
+  Phase 3 code-splitting item, not a dependency one.
+- **0.4 — merge protocol recorded** in `guidelines/Guidelines.md` §7:
+  direction of authority (code is canonical for tokens, Figma for new
+  composition only), the four-step export protocol, and the four deliberate
+  deletions from the original Figma export that must stay deleted.
+- **0.6 — already done**: `npm audit --audit-level=high` gates all three CI
+  jobs and Dependabot covers all three packages plus GitHub Actions.
+- **0.7 / 0.8 — already done** in B0 (timing-safe sync-key comparison;
+  encrypted door-lock credentials).
+- **0.1 — downgraded 17 no-op success toasts** across the 22 unwired screens.
+  Each claimed an operation that did not happen: *"Refund processed —
+  ₦40,000"*, *"Payment recorded"*, *"Walk-in registered · BK-2860 created ·
+  Room 102"* (a fabricated booking reference), *"Check-in started"*. All now
+  read *"Not available yet — …"* as neutral notices. **The one Doc 5 flagged
+  as liability-relevant — the DND wellness check — was already correct**,
+  logging at `info`/`warning` rather than `success`.
+
+**Phase 0 items NOT done, and why:** 0.2 (archive the `Nexura-UI` repo) and
+0.3 (sync Figma variables to code tokens) are actions on GitHub and in Figma,
+outside this repository.
+
+---
+
+### Backend Blueprint B9 — Cancellation, refunds & deposits (migration 0009)
+
+**This is the batch that closes the Execution Plan's Phase 2 exit gate**, and
+finding that out was the point of reading all five documents. Doc 5 puts B9
+inside Phase 2 and marks Phase 2 🔴 BLOCKING, with an exit gate requiring a
+month that reconciles across "arrivals, extensions, no-shows, voids **and
+refunds**". The Backend blueprint's own §D order defers B9 to the
+"parallel-safe" group — so I had been reporting against the looser of two
+conflicting orderings without noticing the stricter one existed.
+
+**It also closes a loop two earlier batches left open, and that loop had a
+real cost.** B5's night audit and B10's no-show endpoint both recorded a
+no-show with `penalty_charge_id = NULL` and a note saying the amount "awaits
+the cancellation-policy engine". Honest at the time — charging a guest an
+invented figure is worse than charging nothing — but it meant **a property
+running this software absorbed every no-show for free**. Both paths now post
+through the engine.
+
+- **The penalty is a TYPE plus a value, never a frozen amount.** Storing
+  "₦45,000 penalty" at booking time would freeze a figure the policy says
+  should move: a first-night penalty on a stay whose rate was later
+  renegotiated has to follow the rate. Five types — `none`, `first_night`,
+  `percentage`, `fixed`, `full_stay` — computed at the moment of charging.
+- **A percentage is of the STAY total, not one night.** 30% of a single night
+  on a week-long booking is a rounding error, not a policy.
+- **The free window covers cancellation, never a no-show.** A guest who
+  simply never arrives has not cancelled, and letting the window excuse that
+  would make it the cheapest way to hold a room for nothing.
+- **The preview is mandatory and computed by the same code that charges.**
+  A test asserts preview == charge exactly. A preview that differs is how a
+  desk ends up arguing about money it has already taken.
+- **Cancelling releases both inventories in the same transaction.** A
+  cancelled stay still holding its rooms is the most expensive bug in this
+  domain — the property cannot sell a room nobody is in. The test does not
+  just check availability; it **rebooks the room**.
+- **Penalties go through the tax engine** like every other posting path
+  (B6 DoD), as their own charge with its own tax line.
+- **Cancelling and WAIVING are separate grants.** Without the split, every
+  cancellation is free the moment a guest complains loudly enough at the desk.
+  A waiver with no stated reason is refused outright.
+- **Refunds are request-then-approve, by different people.** Refunding is the
+  easiest way to steal from a hotel — it turns a recorded payment into cash
+  out of the drawer — so self-approval is a 403, the ledger moves exactly once
+  (at completion, as a B4 reversal so the original payment keeps its amount),
+  deductions are **itemised** rather than netted, refunding by a different
+  method than it was paid needs a stated reason, and anything at or above
+  ₦100,000 needs a grant Finance does not hold.
+- **A deposit is a LIABILITY, not revenue.** Holding one deliberately does
+  *not* touch the folio: until the guest stays, the hotel is holding someone
+  else's money. The three outcomes are three different journal entries —
+  APPLIED creates a folio payment, REFUNDED discharges it, **FORFEITED posts
+  a taxed revenue charge** so kept money lands in the day's income instead of
+  vanishing into a status change.
+
+**Verified — `src/test/cancellation.test.ts`, 25 tests**, including the
+blueprint's five: the penalty matrix hand-computed against a 4-night ₦200,000
+stay; cancellation freeing inventory such that the room is *actually*
+rebookable; waiver without permission → 403; a deposit applied then partially
+refunded reaching a liability of **exactly zero**; and a refund above the
+threshold requiring the elevated grant.
+
+**Four of my own test fixtures were wrong, not the code** — and one was
+instructive. Every penalty came back as zero at first: the fixture pinned
+stays to fixed calendar dates weeks in the future, so the free-cancellation
+window (measured against the real clock) legitimately made them all free. The
+dates are now relative to `new Date()`, with the reasoning recorded in the
+file. The others: a room type with no rooms has no inventory (so every booking
+correctly 409'd), Finance has no `reservations:create` grant (so booking as
+Finance correctly 403'd), and I passed a reservation object where an id was
+expected.
+
+**One honest wart:** a deposit fully released as part-applied/part-refunded
+reports `partially_refunded`, which reads oddly for something with nothing
+outstanding. The blueprint's status enum has no term for a mixed full
+release; `released_at` is what marks it closed. Left as specified rather than
+inventing a sixth status.
+
+**B9 DoD:** no cancellation without financial resolution ✅ · deposits tracked
+as liability ✅ · refunds fully audited ✅.
+
+---
+
+---
+
+### Backend Blueprint B17 — Security hardening 🔴 PILOT BLOCKING (no migration)
+
+**Execution Plan Phase 5.** Seven tasks; the one that mattered most was the
+one I ran first.
+
+**B17.7 — the permission audit, and it found real holes.** "Every route
+declares a permission" is a claim about code that does not exist yet as much
+as code that does, so it is a test that enumerates all 215 routes and forces
+each into one of three explicit buckets: permission-gated, authenticated-only
+(with a written reason), or public (with a written reason). Anything else
+fails the build. **A forgotten route looks identical to a deliberately open
+one, and that ambiguity is the whole problem.**
+
+It flagged 21 undeclared routes. Nineteen were legitimately
+authenticated-only — several are authorised *in-handler* by rules a permission
+key cannot express (`isSelfOrManager` on a staff profile, channel membership
+on chat, per-department row scoping on the department report) — and each now
+carries a stated reason. **Two were genuine defects:**
+
+- **`GET /dashboard/overview` had `requireAuth` and nothing else.** The screen
+  is called *Management* Overview and returns the property's 7-day revenue
+  trend, occupancy and ADR. Every authenticated member of staff — a
+  housekeeper, a waiter — could read it. Now gated on the same grants the
+  revenue reports use.
+- **`GET /users/` returned every colleague's email address** to anyone with a
+  login: a staff-directory dump and the raw material for a phishing run. The
+  endpoint stays open because it is the picker behind every "assign to…"
+  dropdown, which needs names and ids — it never needed emails. Contact
+  details are now returned only to roles that manage people or accounts.
+
+**B17.4 — hard lockout removed, and that is a security *improvement*.** Five
+wrong passwords used to lock an account for 15 minutes. That looked like a
+protection and was a denial-of-service: anyone who knew a colleague's email
+could lock them out of their own shift in five requests, and there is no IT
+desk at 2am. Replaced with exponential backoff keyed on **IP + account** — two
+free attempts, then a growing delay capped at five minutes, and **no permanent
+lockout ever**. Plus `express-rate-limit` (strict on `/auth`, generous
+globally — a front desk legitimately makes hundreds of calls a minute during
+check-in rush) and an IT unlock that clears an account across every address.
+
+**B17.5 — the signing key is encrypted at rest.** It signs every token for the
+property: anyone holding it can mint a token for any role without touching the
+database or leaving a login record, and it sat on disk as plaintext PEM. Mode
+0600 protects it from other accounts on a running system; it does nothing
+about a stolen PC, a disk pulled from a dead machine, or a backup on a USB
+stick. Now AES-256-GCM under a key derived from a hardware identifier **plus**
+an operator passphrase — the machine binding stops a copied file, the
+passphrase stops a stolen machine. Production **refuses to boot** without the
+passphrase. Rotation keeps the previous public key for an overlap window,
+because rotating without one signs the entire shift out at the same instant.
+
+**Honest limits, stated in the code rather than implied:** a hardware
+identifier is not a TPM, and full-disk encryption remains a runbook
+requirement underneath.
+
+**B17.1/2/3/6** — production refuses to bind all interfaces (fatal, not a
+warning: the thing being warned about is "the API is reachable from guest
+wifi"); CORS moved from `origin: true` (which with `credentials: true` let
+*any* site a logged-in staff member visited read this API) to an explicit
+allowlist, empty by default in production because the packaged image is
+same-origin; helmet with a CSP that has no `unsafe-inline` for scripts; and
+failed logins now record the attempted address as a **salted hash** rather
+than verbatim — people type passwords into the email field, and an audit log
+readable by `admin:operations` should not accumulate them.
+
+**Verified — 18 new tests** across `route-permissions.test.ts` (5) and
+`security.test.ts` (13), plus 3 rewritten in `auth-login.test.ts`. The
+blueprint's list is covered: the key file is not valid PEM on disk while
+tokens still verify; rotation keeps old tokens working during the overlap and
+fails them after; a cross-origin write is rejected; production refuses to bind
+all-interfaces; and repeated logins throttle without locking anyone out.
+
+**My own enumeration test caught a bug in my own implementation.** The
+unknown-account branch recorded the failure but still answered 401 while a
+real account answered 429 — making the status difference a free
+account-enumeration oracle, which is precisely what that code was meant to
+prevent. Both paths now respond identically.
+
+**A test-hygiene defect found in live verification:** the security suite calls
+`rotateSigningKey()`, which was operating on the **real dev key directory** —
+running the tests signed out every live session, and on a machine also serving
+a property that would be an outage caused by CI. The key directory is now
+overridable (`NEXURA_KEYS_DIR`) and the suite uses a temp path.
+
+**Live-verified:** fresh provisioning wrote an encrypted key with no plaintext
+copy; the boot log reports its posture (mode, bind, overlay, CORS, cookie
+flags); CSP/nosniff/frame/referrer headers present; a cross-origin write got
+403; front desk got 403 on the management overview while Finance got 200; and
+staff emails were absent for both non-HR roles.
+
+**B17 DoD:** no plaintext signing key ✅ · every route permission-declared ✅
+(enforced by test) · rate limiting active ✅ · no plaintext HTTP in production
+— **partially**: the bind guard, secure cookies and HSTS are in place, but TLS
+itself is delivered by the mesh overlay, which is a deployment step. The server
+detects and reports whether it is on one; it cannot install it.
+
+---
+
+### Backend Blueprint B18 — Update channel signing & rollback 🔴 PILOT BLOCKING (migration 0010)
+
+**The Production blueprint calls the unsigned auto-update channel "the highest
+severity in the repo", and it was right.** The updater resolved a *mutable*
+Docker tag and swapped the running container: anyone who could push to that
+tag — a compromised registry account, a typo-squatted repository, anyone on
+the network path — executed arbitrary code as root on every property
+simultaneously, with no human in the loop and no record of what changed.
+
+- **Signature verification is the core, and it fails CLOSED everywhere.**
+  Every failure mode returns a non-verified status; there is no path that
+  returns success on error, no "could not check, assume fine", and no flag
+  that skips it. An empty trust set refuses *everything* — and a malformed
+  `NEXURA_UPDATE_TRUSTED_KEYS` is treated as no trust rather than skip, so a
+  typo in a deploy variable cannot open the gate.
+- **The signature covers the DIGEST, not the tag.** Signing a mutable pointer
+  would mean nothing. The tag resolves to `sha256:…` once, the signature is
+  verified over that, and the pull is by digest — so what was verified is
+  necessarily what runs. Verifying a tag and then pulling it leaves a window
+  in which the tag moved, which is the attack, not a theoretical race.
+- **Trust is pinned in the build, never fetched with the image.** A signature
+  checked against a key supplied by whoever supplied the image proves only
+  that they can sign their own work.
+- **Automatic rollback.** A property takes an update at 04:00, the container
+  never comes up healthy, nobody is awake. The swap now polls health for a
+  bounded window and, on failure, restores the previous digest unattended and
+  records that it did. A swap that fails *outright* is reported as `failed`,
+  not `rolled_back` — the old container is still running, and claiming a
+  rollback that never happened would be a false record.
+- **Ringed rollout** (`canary` → `early` → `general`), defaulting to the
+  **safest** ring: a branch whose ring failed to sync receives fewer updates,
+  not more.
+- **Schema-downgrade refusal**, pairing with B1's future-schema guard from the
+  other side: B1 stops an old binary opening a new database, this stops us
+  installing that binary at all.
+
+**My own test caught an inverted comparison in the ring logic** — as written,
+a canary-only release would have been accepted by *every property in the
+estate*, which is precisely the blast radius rings exist to avoid. The
+direction is now asserted in both directions with a comment explaining why.
+
+**A second real fix from a failing test:** the rollback path updated the
+health fields but never re-asserted `current_image_digest`, so a property that
+had rolled back could still report the *failed* digest as current — the one
+question that record exists to answer.
+
+**Verified — `src/test/updater.test.ts`, 23 tests, with real ECDSA key pairs
+generated at test time.** Covers the blueprint's six: unsigned → refused with
+no swap attempted; wrong key → refused; a signature lifted from another
+release → refused; general-ring branch ignores a canary release; schema
+downgrade refused; and a health-check failure rolling back to the prior digest
+with the property still serving.
+
+**WHAT IS NOT VERIFIED, stated plainly rather than implied.** There is no
+Docker daemon and no registry in this environment, so:
+- the **container swap itself** is not exercised — `swap` and `probeHealth`
+  are injected, which is *why* the orchestration around them (the part that
+  decides to roll back) is fully tested while the shell-out stays honestly
+  unverified;
+- **tag → digest resolution against a live registry** is implemented to the
+  Registry V2 spec but only exercised against its own logic;
+- **CI-side `cosign sign`** is a pipeline change, not application code, and
+  has not been written;
+- `fetchReleaseSignature` **returns null (= unsigned) as a deliberate stub** —
+  so the unfinished half fails closed and refuses every update, rather than
+  looking like it works. When CI starts publishing signatures, that one
+  function is what changes.
+
+**Live-verified:** schema version 10, ring defaults to `general`,
+`trustedKeyCount: 0` / `updatesPossible: false` — this build refuses every
+update, correctly, because no release-signing key exists yet. The posture
+endpoint surfaces that explicitly, because "updates are silently not
+happening" and "updates are being correctly refused" otherwise look identical
+from outside.
+
+**B18 DoD:** unsigned images cannot be deployed ✅ (enforced in code and
+tested) · a broken update self-heals ✅ (orchestration tested; the Docker call
+is not) · digest and signature status visible ✅ locally at `/updates/status`
+— **centrally is pending B20's sync payload work.**
+
+---
+
+### Backend Blueprint B19 — Backups & observability 🔴 PILOT BLOCKING (migration 0011)
+
+**Two failures, both of which end with a hotel losing data and nobody having
+noticed in time.**
+
+**1. An untested backup is not a backup.** What existed was
+`sqlite.backup(dest)` — a file, with its size recorded next to it. Nothing
+verified it was readable, nothing detected a truncation from a full disk,
+nothing was encrypted, and no snapshot had ever been restored. A property
+finds out which of those mattered on the one morning it needs a backup.
+
+Four things now make it real: **VACUUM INTO** rather than a file copy (SQLite
+runs in WAL mode; copying the `.db` alone captures a database missing
+everything still in the `-wal`); a **checksum over the plaintext**, so it
+verifies the database rather than the envelope; **AES-256-GCM encryption**,
+because a backup is a full copy of every guest's personal data and the copy
+most likely to end up on a USB stick; and **an automated restore test** that
+decrypts into a scratch file, opens it as a real database, runs
+`integrity_check` and a validation query set. A snapshot that fails is marked
+`unrestorable` so it can never be offered as a recovery point.
+
+The restore test runs **on every scheduled backup**, not monthly as the
+blueprint suggests — it takes seconds on a property-sized database, and a
+monthly cadence means up to a month of snapshots nobody has proven
+restorable. The thing that makes a backup real should not be the thing that is
+easiest to skip.
+
+**Retention never deletes the last verified snapshot**, whatever the policy
+says. A retention rule that can leave a property with zero recovery points is
+a data-loss mechanism wearing a housekeeping costume.
+
+**2. A dead property is silent.** A branch whose server died at 02:00 sends no
+error and looks exactly like one that is quiet, so the alert has to be
+**expected-and-missing**: a heartbeat every 60s carrying disk, WAL size, error
+count, queue depth, schema version and clock offset. Kept **locally as well as
+pushed** — the moment central most wants this data is when the uplink is down,
+and unpushed samples are deliberately exempt from ring-buffer pruning because
+they are the record of the outage itself.
+
+**The health endpoint could not previously fail.** It was
+`res.json({ ok: true })` — a hardcoded literal that reported healthy while the
+disk was full, while the database was read-only, and while migrations had
+failed, because it never asked anything. **B18's automatic rollback watches
+this endpoint**, so a health check that cannot fail would have told it a broken
+build was fine. It now runs five probes that can each genuinely fail, and
+returns **503** when the property cannot operate.
+
+The database probe **actually writes** — inside a transaction that is always
+rolled back. A read-only filesystem or a stale lock presents as a database that
+opens perfectly and refuses the first INSERT, which a clerk experiences as a
+check-in that will not save, next to a green indicator.
+
+**The disk guard refuses work that only ADDS data** while leaving check-out,
+payment, day-close, login and backup working. A property at 400 MiB free must
+still be able to settle a bill and release a room; blocking everything would
+strand guests in rooms the system refuses to free.
+
+**Verified — `src/test/backup-health.test.ts`, 19 tests**, all against real
+databases and real encryption. Covers the blueprint's six: a backup taken
+*during* active writes restores; a corrupted snapshot fails its checksum and is
+marked unrestorable; the restore test detects a truncated file; the health
+endpoint reports unhealthy and returns 503; and the disk guard's essential-path
+split is asserted route by route.
+
+**Two real defects found while testing.** `backup_snapshots.created_by` was
+`NOT NULL` — a *scheduled* backup has no operator behind it, and inventing a
+fake user id to satisfy the constraint would have put a fiction in the audit
+trail; the migration rebuilds the table to make it nullable, copying rows
+rather than discarding them. And B1's **checksum guard correctly refused to
+start** when I edited an already-applied migration, which is precisely what it
+exists for — the dev database was restored from the runner's own pre-migration
+snapshot.
+
+**Live-verified on the real dev database:** a snapshot was taken, encrypted
+(`enc.v1.…` on disk, not `SQLite format 3`), and then genuinely restored and
+validated — schema v11, 7 users, 9 reservations, 32 folio charges. The health
+endpoint reports `degraded` with two honest warnings rather than a fabricated
+all-clear.
+
+**Honest gaps:** offsite replication (B19.3) has its schema and status
+tracking but **no transport** — there is no configured remote to replicate to,
+and a stub would look like protection that does not exist. Central fleet
+dashboard endpoints (B19.8) are central-server work pending B20's sync
+payload. Clock-offset detection catches a clock that *jumped while running*,
+not one that was wrong from boot — that needs central's timestamp.
+
+**B19 DoD:** encrypted checksummed backups with verified restores ✅ ·
+heartbeat recorded and queued ✅ (central-side alerting pending B20) · health
+endpoint meaningful ✅.
+
+---
+
+### Backend Blueprint B23 — Payments gateway & POS terminal (migration 0012)
+
+**Until now a payment was a row someone typed.** An amount, a method, a name.
+Nothing connected it to a card actually being charged, nothing detected the
+same charge being taken twice, and nothing reconciled what the bank paid out
+against what the property recorded.
+
+**The property that matters most: a retry never double-charges.** A card
+payment that times out is the NORMAL case on a Nigerian hotel's uplink, not an
+edge case — the clerk sees a spinner, the guest's phone shows a debit alert,
+and the clerk presses again because from where they stand nothing happened.
+Without an idempotency key that second press takes a second ₦85,000 off a real
+person's card. The key is UNIQUE per branch at the database level and a repeat
+returns the ORIGINAL transaction; a **missing** key is refused rather than
+generated, because generating one would make every call unique and silently
+remove the protection the caller believes it has.
+
+**A checkout is never blocked on gateway reachability.** An unreachable
+gateway is *not* a declined card — conflating them has a clerk tell a guest
+their card was refused when it was never presented. Cash and a standalone POS
+terminal keep working and record as `pending_verification` for a later sweep;
+card is refused with instructions to use a channel that works. Verification
+failing later does **not** mark a real payment failed: marking it so because
+we could not *ask* would delete a payment that happened.
+
+**Webhooks are signature-verified and replay-safe.** An unsigned webhook is an
+unauthenticated instruction to mark money as received — the most valuable
+forgery available against a hotel. Signatures use `timingSafeEqual`, the raw
+body is preserved (re-serialising parsed JSON produces different bytes that
+never match), and the gateway's event id makes a redelivery a no-op. Duplicates
+and unknown events both answer **200**, because a gateway retries anything
+non-2xx forever.
+
+**Settlement variance is surfaced, never absorbed.** It would be easy to make
+the numbers agree by adjusting the recorded side to match the bank; that turns
+a detectable loss into a silent one. A payout is checked in *both* directions —
+references it claims that we have no record of, and successful transactions it
+omits — and a transaction the payout skipped stays `unsettled` so it appears in
+the next reconciliation rather than ageing out. Signing off **acknowledges** a
+variance; it never erases it.
+
+**Verified — `src/test/payments.test.ts`, 22 tests** covering the blueprint's
+five, plus the converse cases that matter: different keys are *not*
+deduplicated, a retried decline still reads as declined, and a channel a
+provider cannot take is refused up front from its declared capabilities rather
+than attempted.
+
+**Four real defects found while testing, three in my own code:**
+1. The `FakePaymentProvider` kept its ledger **per instance**, but
+   `providerFor()` builds a fresh provider per call — so `verify()` never
+   recognised a reference `initiate()` had just created. A stand-in that
+   cannot model "the gateway knows about this charge" is not a useful
+   stand-in.
+2. `postPaymentToFolio` fell back to the **branch id in a user column** when a
+   webhook had no actor — caught by a foreign-key violation. Folio rows from a
+   webhook are now attributed to the clerk who *initiated* the transaction,
+   rather than to an invented system user that would put a fiction in the cash
+   reconciliation.
+3. The **route audit** (B17.7) caught that B23's permission keys existed in
+   the migration but never in the vocabulary, and that the webhook was
+   unauthenticated without being declared.
+4. `lint:invariants` caught an open-coded `/ 100` in the terminal instruction
+   string — invariant 2, in code I had just written.
+
+**And one from the OpenAPI lint:** `/payments/webhook/{provider}` is genuinely
+ambiguous with `/payments/{id}/verify` — a POST to `/payments/webhook/verify`
+could match either, and which wins depends on registration order. The webhook
+moved to its own `/payment-webhooks/{provider}` mount.
+
+**WHAT IS NOT VERIFIED.** There are no gateway credentials in this
+environment, so the **Paystack adapter's HTTP calls are unexercised** — request
+shapes, field names and the signature scheme come from the published
+documentation and are correct as far as reading can make them, which is not the
+same as correct. Everything above runs against `FakePaymentProvider`, which
+implements the same interface: the seam exists precisely so the money logic can
+be verified without a live card being charged in CI, and pointing this at a
+Paystack test account is a configuration change rather than a rewrite.
+Flutterwave and Moniepoint adapters are **not written**; `manual` (cash) is,
+and declares honestly that it has no gateway and no webhook.
+
+**Live-verified:** schema 12, gateway configured, and the same idempotency key
+posted twice produced **one** transaction (`replay: true` on the second) — one
+row in the database for two button presses. An unsigned webhook was refused
+with 401 before anything in it was read.
+
+**B23 DoD:** no double-charge under retry ✅ · webhooks verified and idempotent
+✅ · checkout works offline ✅.
+
+## Backend Blueprint status
+
+**Every 🔴 PILOT BLOCKING batch is complete, plus B23** (B0 → B1 → B2 → B3 →
+B4 → B5 → B6 → B7 → B8 → B9 → B10 → B17 → B18 → B19 → B23). 314 local-server
+tests + 6 central-server, three clean typechecks, `lint:invariants --strict` enforcing
+invariants 2, 3, 9 and the B6 no-bypass rule, a route audit forcing every
+endpoint to declare its access, and a valid 229-endpoint OpenAPI spec.
+
+**Execution Plan Phase 5 (Security & deployment) is complete on the backend
+side.** Its exit gate — "unsigned image rejected; deliberately broken update
+auto-rolls-back; encrypted restore succeeds unattended" — is met in code and
+in tests, with the Docker-dependent halves flagged as unverified rather than
+claimed.
+
+**Against the Execution Plan (`Nexura-Execution-Plan.md`, the master document):
+Phase 0 is clear, Phase 1 is complete, and Phase 2 now genuinely meets its
+exit gate** — B9 was the missing 2.4, and without refunds the "arrivals,
+extensions, no-shows, voids and refunds" reconciliation could not have been
+run at all.
+
+**Still open in Phase 2, and both are UI, not backend:** 2.6 the Night Audit
+screen (Doc 3 calls it "the single most important missing screen") and 2.7 the
+Tax Config / Refund / Void screens. Every endpoint they need now exists.
+
+**The backend is four batches ahead of the frontend.** 60 of 80 screens are
+wired; the 20 that are not include `ReservationDetail`, `ReservationSearch`,
+`RateManagement`, `InvoiceReceipts`, `WalkInReg`, `RoomAssignmentBoard` and
+`CancellationRefund` — precisely the screens B7, B8, B9 and B10 were built to
+serve. Phase 3 (UI foundation) is now **complete** (12/12, see
+`UI-ADOPTION-TRACKER.md` §3); wiring has started, with `ArrivalsScreen` and
+`DeparturesScreen` live.
+
+### B10.1 — Arrival & departure times 🟡 UI-BLOCKING, NOT STARTED
+
+**Found 2026-08-16 while wiring Arrivals and Departures.** Three columns the
+Figma design calls for have no backing field, so they render "—":
+
+| Screen | Column | Missing |
+|---|---|---|
+| Arrivals | ETA | `reservations.expected_arrival_time` |
+| Departures | Checkout Time | branch default + per-stay override |
+| Departures | Late Checkout | `late_check_out_until` + approver |
+
+`reservations` stores whole business dates only. The mock filled these with
+`14:00` / `11:00` / a "Late Checkout" badge that nothing produced. The columns
+were kept and left empty rather than deleted or filled with invented values.
+
+**This is not cosmetic.** Late checkout decides whether housekeeping can turn
+a room for the next arrival and whether a fee is due; an ETA is what lets a
+front desk sequence twelve simultaneous arrivals. Full spec is B10.1 in
+`Nexura-Backend-Build-Blueprint.md` — three nullable columns and two branch
+settings. **It should ride along with whichever backend batch comes next**
+rather than waiting for a slot of its own.
+
+When it lands, the `—` placeholders and their explanatory comments in
+`ArrivalsScreen.tsx` and `DeparturesScreen.tsx` come out in the same change.
+
+B9 live check: migration 0009 applied to schema version 9, the STANDARD 24h
+policy seeded per branch, a cancellation preview correctly reported ₦0 inside
+the free window and cancelled cleanly, and a ₦50,000 deposit held → ₦30,000
+applied → ₦20,000 refunded reached an outstanding balance of exactly 0, with
+only the applied ₦30,000 ever reaching the folio.
+
+**Next in the blueprint's pilot-critical order:** **B24** (printing — folio,
+receipt, registration card, kitchen ticket), the last item in the
+pilot-critical chain.
+
+**But the larger question is sequencing, not the next batch.** The backend is
+now six batches ahead of the frontend: 58 of 80 screens are wired, and the 22
+that are not are exactly the ones B7–B10 were built to serve. Doc 5's Phase 3
+(UI foundation) was specified to run parallel to Phase 2 and has not started,
+and Doc 3 calls the Night Audit screen "the single most important missing
+screen" — its endpoints have existed since B5.
