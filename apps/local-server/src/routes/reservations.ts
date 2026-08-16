@@ -317,6 +317,31 @@ function decorate(rows: (typeof reservations.$inferSelect)[]) {
   });
 }
 
+/**
+ * Attach folio totals to a page of reservations.
+ *
+ * The two lists that show money -- Departures and In-House -- are the two
+ * where it is not decoration. A clerk cannot check anyone out without knowing
+ * what they owe, and the in-house list is where a bill running away gets
+ * noticed. Having the screen fetch it per row would be one request per guest
+ * on every refresh.
+ *
+ * ALWAYS CALL THIS AFTER paginate(), never before: the cost is one folio
+ * summary per row, so applying it to a page bounds the work at page size
+ * instead of the whole day's list.
+ */
+function withFolioTotals<T extends { id: string }>(items: T[]) {
+  return items.map(r => {
+    const folio = folioSummary(r.id);
+    return {
+      ...r,
+      totalChargesKobo: folio.totalChargesKobo,
+      totalPaidKobo: folio.totalPaidKobo,
+      balanceKobo: folio.balanceKobo,
+    };
+  });
+}
+
 const ACTIVE_STATUSES = ["confirmed", "pending", "checked_in"];
 
 // GET /reservations/search — name|number|phone|email|room|range|status|plan
@@ -404,24 +429,11 @@ router.get("/departures", requireAuth, (req: AuthedRequest, res) => {
     .filter(r => businessDateOf(r.checkOutDate).getTime() === date.getTime()
       && r.status !== "cancelled" && r.status !== "no_show");
 
-  // Departures is the one list where the outstanding balance is not
-  // decoration: a clerk cannot check anyone out without knowing what they
-  // owe, and making the screen fetch it per row would be one request per
-  // departing guest every time the list refreshes. Paginate FIRST so the
-  // folio work is bounded by page size, not by the whole day's departures.
   const page = paginate(decorate(rows), parsePageOptions(req.query as Record<string, unknown>), r => r.id);
   res.json({
     businessDate: formatBusinessDate(date),
     ...page,
-    items: page.items.map(r => {
-      const folio = folioSummary(r.id);
-      return {
-        ...r,
-        totalChargesKobo: folio.totalChargesKobo,
-        totalPaidKobo: folio.totalPaidKobo,
-        balanceKobo: folio.balanceKobo,
-      };
-    }),
+    items: withFolioTotals(page.items),
   });
 });
 
@@ -431,9 +443,11 @@ router.get("/in-house", requireAuth, (req: AuthedRequest, res) => {
     eq(reservations.branchId, branchId),
     eq(reservations.status, "checked_in"),
   )).all();
+  const page = paginate(decorate(rows), parsePageOptions(req.query as Record<string, unknown>), r => r.roomNumber ?? "~");
   res.json({
     businessDate: formatBusinessDate(currentBusinessDate(branchId)),
-    ...paginate(decorate(rows), parsePageOptions(req.query as Record<string, unknown>), r => r.roomNumber ?? "~"),
+    ...page,
+    items: withFolioTotals(page.items),
   });
 });
 

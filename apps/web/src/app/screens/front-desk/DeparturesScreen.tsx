@@ -40,7 +40,7 @@ import {
   settingsApi, type BranchSettings, type UserPreferences, type ModuleKey,
   dashboardApi, type RoleDashboard, type ManagementOverview, type DashboardStat, type ActivityEvent,
   syncApi, type SyncStatus, type CachedBranch,
-  type DepartureRow,
+  type ReservationWithBalance,
 } from "../../lib/api";
 import {
   type Role, type Toast, type ToastType, type AddToast, fmtN, uid,
@@ -83,7 +83,7 @@ function initials(name: string | null): string {
 
 export function DeparturesScreen({ add }: { add: (t: Omit<Toast, "id">) => void }) {
   const navigate = useNavigate();
-  const [rows, setRows] = useState<DepartureRow[]>([]);
+  const [rows, setRows] = useState<ReservationWithBalance[]>([]);
   const [businessDate, setBusinessDate] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);

@@ -212,7 +212,7 @@ are unwired too.
 | ☐ | `ReservationSearch` | B10 ✅ | `GET /reservations/search` (paginated) |
 | ☑ | `ArrivalsScreen` | B10 ✅ | `GET /reservations/arrivals` — **done**. Fixed a no-op toolbar (search + 4 tabs filtered an array the table ignored) and a dead "Print List". **ETA column has no backing field** — kept, reads “—”. |
 | ☑ | `DeparturesScreen` | B10 ✅ | `GET /reservations/departures` — **done**. Balance Due needed a server change (endpoint now returns folio balance per row, computed after pagination). **Checkout Time and Late Checkout have no backing fields** — kept, read “—”. |
-| ☐ | `InHouseGuests` | B10 ✅ | `GET /reservations/in-house` |
+| ☑ | `InHouseGuests` | B10 ✅ | `GET /reservations/in-house` — **done**. Endpoint now returns folio totals (shared `withFolioTotals` helper, applied after pagination). **Four inert controls fixed**: the search box had no state at all, and Filter / Export / Post Charge had no handlers. |
 | ☐ | `RoomAssignmentBoard` | B10 ✅ | `GET /rooms/assignment-board`, `POST /:id/assign-room` |
 | ☐ | `WalkInReg` | B10 ✅ | `POST /reservations/walk-in` |
 | ☐ | `CancellationRefund` | B9 ✅ | `/cancellation-preview`, `/cancel`, `/refunds` |
@@ -429,11 +429,11 @@ Doc 3 §5 (quality gates). A screen is not checked off until:
 | UI foundation — Phase 3 (§3) | **12** | **12 ✅** |
 | New screens, backend ready (§4) | 0 | 11 |
 | New screens, blocked (§5) | 0 | 10 |
-| Main's unwired screens (§6) | **2** | 22 (11 ready, 11 blocked) |
+| Main's unwired screens (§6) | **3** | 22 (11 ready, 11 blocked) |
 | Figma batches undesigned (§7) | 0 | 3 batches / ~25 screens |
 | Non-screen assets (§8) | 0 | 6 |
 | Overlap decisions (§9) | 0 | 80 |
-| **Total** | **14 done** | **67 items + 80 screen decisions** |
+| **Total** | **15 done** | **67 items + 80 screen decisions** |
 
 ---
 
@@ -441,6 +441,7 @@ Doc 3 §5 (quality gates). A screen is not checked off until:
 
 | Date | Item | Note |
 |---|---|---|
+| 2026-08-16 | **InHouseGuests wired** | Folio totals added to the in-house endpoint via a shared helper (same reasoning as Departures: this is where a bill running away gets noticed). Client type renamed `DepartureRow` → `ReservationWithBalance` now that two lists use it. Export writes a real CSV of the filtered rows, in **kobo** — a spreadsheet column that has been through a float conversion is exactly how money goes wrong. |
 | 2026-08-16 | **The route audit caught my new endpoint** | `route-permissions.test.ts` (B17.7) failed: it enumerates every endpoint and refuses to pass until each is explicitly classified, and `GET /guests/:id` was in no bucket. Classified as authenticated-only with a written reason. **It caught what live verification did not** — I had confirmed the endpoint returned correct data and 404'd properly, but never asked who may call it. Rule for the remaining screens: a new endpoint and its route-permission entry go in the same change. 314/314 green after the fix. |
 | 2026-08-16 | **Wiring started — Arrivals + Departures live** | Client API extended with the B7–B10 surface and **verified against the running server**, not just typechecked: response shapes confirmed field-by-field, balance arithmetic checked (₦206,335.00 − ₦130,000.00 = ₦76,335.00). |
 | 2026-08-16 | **Tracker error corrected** | §6 claimed `GET /guests/:id` existed. It did not. Added it, plus a `limit` parameter on `GET /guests` (was a hardcoded 20 that silently truncated the guest directory). OpenAPI now 229 endpoints. |

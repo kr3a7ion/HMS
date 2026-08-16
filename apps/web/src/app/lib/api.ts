@@ -778,17 +778,19 @@ export interface EnrichedReservation {
 }
 
 /**
- * Departures carry the folio balance; no other list does. A clerk cannot
- * check anyone out without knowing what they owe, so the server computes it
- * per row (after pagination, so the cost is bounded by page size).
+ * The two lists that show money — Departures and In-House — carry folio
+ * totals per row. A clerk cannot check anyone out without knowing what they
+ * owe, and the in-house list is where a bill running away gets noticed. The
+ * server computes these after pagination, so the cost is bounded by page
+ * size rather than by the whole list.
  */
-export interface DepartureRow extends EnrichedReservation {
+export interface ReservationWithBalance extends EnrichedReservation {
   totalChargesKobo: number;
   totalPaidKobo: number;
   balanceKobo: number;
 }
 
-export type DeparturePage = Page<DepartureRow> & { businessDate: string };
+export type BalancePage = Page<ReservationWithBalance> & { businessDate: string };
 
 export interface ReservationBrief {
   reservationId: string; guestName: string | null; vip: boolean; status: string;
@@ -849,9 +851,9 @@ export const reservationsApi = {
   arrivals: (params: { date?: string; cursor?: string; limit?: number } = {}) =>
     api.get<ReservationPage>(`/reservations/arrivals${qs(params)}`),
   departures: (params: { date?: string; cursor?: string; limit?: number } = {}) =>
-    api.get<DeparturePage>(`/reservations/departures${qs(params)}`),
+    api.get<BalancePage>(`/reservations/departures${qs(params)}`),
   inHouse: (params: { cursor?: string; limit?: number } = {}) =>
-    api.get<ReservationPage>(`/reservations/in-house${qs(params)}`),
+    api.get<BalancePage>(`/reservations/in-house${qs(params)}`),
   search: (params: ReservationSearchParams = {}) =>
     api.get<ReservationPage>(`/reservations/search${qs(params)}`),
   walkIn: (input: WalkInInput) => api.post<ReservationDetail>("/reservations/walk-in", input),
