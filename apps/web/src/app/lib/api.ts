@@ -158,7 +158,7 @@ export const roomsApi = {
   assignmentBoard: (date?: string) =>
     api.get<AssignmentBoard>(`/rooms/assignment-board${date ? `?date=${encodeURIComponent(date)}` : ""}`),
   assignRoom: (reservationId: string, roomId: string) =>
-    api.post<ReservationListItem>(`/reservations/${reservationId}/assign-room`, { roomId }),
+    api.post<AssignRoomResult>(`/reservations/${reservationId}/assign-room`, { roomId }),
 };
 
 export interface GuestStay {
@@ -804,6 +804,22 @@ export interface AssignmentBoardRoom {
   arrival: ReservationBrief | null;
   departure: ReservationBrief | null;
   occupant: ReservationBrief | null;
+}
+
+/**
+ * The server does more than record the assignment: it reports whether the
+ * room's type differs from what was booked and what that type indicates as a
+ * rate. Verified against a live assignment — booked at ₦45,000, assigned to a
+ * Deluxe, returned typeChanged: true and indicativeRateKobo: 5_500_000.
+ *
+ * `indicativeRateKobo` is INDICATIVE, not applied. Whether the guest actually
+ * pays the difference after an upgrade is a commercial decision a person
+ * makes, so the screen shows it and does not act on it.
+ */
+export interface AssignRoomResult extends EnrichedReservation {
+  assignedRoomNumber: string | null;
+  typeChanged: boolean;
+  indicativeRateKobo: number | null;
 }
 
 export interface AssignmentBoard {

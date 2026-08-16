@@ -213,7 +213,7 @@ are unwired too.
 | ☑ | `ArrivalsScreen` | B10 ✅ | `GET /reservations/arrivals` — **done**. Fixed a no-op toolbar (search + 4 tabs filtered an array the table ignored) and a dead "Print List". **ETA column has no backing field** — kept, reads “—”. |
 | ☑ | `DeparturesScreen` | B10 ✅ | `GET /reservations/departures` — **done**. Balance Due needed a server change (endpoint now returns folio balance per row, computed after pagination). **Checkout Time and Late Checkout have no backing fields** — kept, read “—”. |
 | ☑ | `InHouseGuests` | B10 ✅ | `GET /reservations/in-house` — **done**. Endpoint now returns folio totals (shared `withFolioTotals` helper, applied after pagination). **Four inert controls fixed**: the search box had no state at all, and Filter / Export / Post Charge had no handlers. |
-| ☐ | `RoomAssignmentBoard` | B10 ✅ | `GET /rooms/assignment-board`, `POST /:id/assign-room` |
+| ☑ | `RoomAssignmentBoard` | B10 ✅ | `GET /rooms/assignment-board`, `POST /:id/assign-room` — **done**. Assignment proven end-to-end against a real reservation. Surfaces the server's `indicativeRateKobo` on a type change. Auto-Assign stays honestly unwired — allocation policy belongs on the server. |
 | ☐ | `WalkInReg` | B10 ✅ | `POST /reservations/walk-in` |
 | ☐ | `CancellationRefund` | B9 ✅ | `/cancellation-preview`, `/cancel`, `/refunds` |
 | ☐ | `InvoiceReceipts` | B7 ✅ | `/invoices`, `/receipts` |
@@ -429,11 +429,11 @@ Doc 3 §5 (quality gates). A screen is not checked off until:
 | UI foundation — Phase 3 (§3) | **12** | **12 ✅** |
 | New screens, backend ready (§4) | 0 | 11 |
 | New screens, blocked (§5) | 0 | 10 |
-| Main's unwired screens (§6) | **4** | 22 (11 ready, 11 blocked) |
+| Main's unwired screens (§6) | **5** | 22 (11 ready, 11 blocked) |
 | Figma batches undesigned (§7) | 0 | 3 batches / ~25 screens |
 | Non-screen assets (§8) | 0 | 6 |
 | Overlap decisions (§9) | 0 | 80 |
-| **Total** | **16 done** | **67 items + 80 screen decisions** |
+| **Total** | **17 done** | **67 items + 80 screen decisions** |
 
 ---
 
@@ -441,6 +441,7 @@ Doc 3 §5 (quality gates). A screen is not checked off until:
 
 | Date | Item | Note |
 |---|---|---|
+| 2026-08-16 | **RoomAssignmentBoard wired** | Caught my own bad filter by checking real data: I required rooms to be clean, which showed **zero assignable rooms** because both free rooms were mid-clean. Backwards — a front desk assigns in the morning, precisely when rooms are dirty. Now every free room is offered with its housekeeping state shown rather than used to hide it. Also found the server returns `typeChanged` and `indicativeRateKobo` on assignment, which I was discarding; an upgrade's rate implication now reaches the clerk instead of surfacing at checkout. |
 | 2026-08-16 | **Regression I introduced, caught by running the app** | Replacing the fake sync pill was right; returning `null` when it could not read sync was not. `/sync/status` needs `admin:operations` — FD/HK/RT get a 403 — and even MGT gets `configured: false` on this install, so **the header pill had disappeared for every role**. Exactly the silent-UI-removal the standing rule forbids, committed by me two commits after writing that rule down. The pill now always shows connection state (needs no permission) and adds sync detail only where readable. |
 | 2026-08-16 | **ReservationSearch wired** | Filters moved into the URL, the first screen to use the `useSearchParams` gate from §10. Client param corrected: the server reads `roomNumber`, my type said `room` — it would have been silently ignored. Status values verified live against the server's snake_case (`status=checked_in` → exactly the 2 checked-in rows). |
 | 2026-08-16 | **InHouseGuests wired** | Folio totals added to the in-house endpoint via a shared helper (same reasoning as Departures: this is where a bill running away gets noticed). Client type renamed `DepartureRow` → `ReservationWithBalance` now that two lists use it. Export writes a real CSV of the filtered rows, in **kobo** — a spreadsheet column that has been through a float conversion is exactly how money goes wrong. |
