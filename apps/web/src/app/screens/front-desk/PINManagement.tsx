@@ -72,7 +72,8 @@ function pinStatus(validTo: string): { label: string; colors: { bg: string; text
   return { label: "Active", colors: { bg: "#DCFCE7", text: "#166534" } };
 }
 
-export function PINManagement({ add, nav }: { add: (t: Omit<Toast, "id">) => void; nav?: (s: string, label: string) => void }) {
+export function PINManagement({ add }: { add: (t: Omit<Toast, "id">) => void }) {
+  const navigate = useNavigate();
   const [pins, setPins] = useState<AccessCredential[]>([]);
   const [loading, setLoading] = useState(true);
   const [newPin, setNewPin] = useState<{ room: string; pin: string } | null>(null);
@@ -102,7 +103,7 @@ export function PINManagement({ add, nav }: { add: (t: Omit<Toast, "id">) => voi
 
   return (
     <div>
-      <PageHeader title="PIN Management" sub="All active PINs across the property · Door Lock" actions={nav && <BtnO label="Key Card Log" icon={ClipboardList} onClick={() => nav("key-card-log", "Key Card Log")} />} />
+      <PageHeader title="PIN Management" sub="All active PINs across the property · Door Lock" actions={<BtnO label="Key Card Log" icon={ClipboardList} onClick={() => navigate("/front-desk/key-card-log")} />} />
       <div className="bg-white rounded-xl border overflow-hidden" style={{ borderColor: BORDER }}>
         {loading ? <div className="p-5"><div className="h-40 rounded-lg animate-pulse" style={{ backgroundColor: "#F1F5F9" }} /></div> : pins.length === 0 ? <EmptyState icon={Hash} message="No active PINs right now." /> : (
           <table className="w-full">

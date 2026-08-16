@@ -130,11 +130,15 @@ mistake available here (Doc 3 §2.3).
 - [x] **F10 — TanStack Query** — installed and mounted with LAN-tuned
       defaults. **Mutations never auto-retry** — retrying a write risks
       double-posting a charge.
-- [ ] **F11 — Navigation rebuild.** The `Screen` enum still exists alongside
-      `react-router` — two sources of truth (Doc 3 §3). Delete the enum, move
-      `SCREEN_ROLE_MAP` onto route definitions, filters into `useSearchParams`.
-      **Still outstanding** — the largest single item here, touching all 80
-      screens' entry points.
+- [x] **F11 — Navigation rebuild.** `routes.tsx` is now the only source of
+      truth: 83 routes (80 screens + 3 dual-path variants), each carrying its
+      path, label, roles and module. The `Screen` union, `SCREEN_ROLE_MAP`,
+      `DOOR_LOCK_SCREENS`, the `NAV` tree and the 90-branch `Router` switch are
+      all deleted — **−445 lines from `App.tsx` and `data.tsx`**. The sidebar,
+      `<Routes>`, role filtering, module gating and the header title all derive
+      from it, and a dev-time assertion fails the build if a sidebar entry
+      points at a route that does not exist. Screen and title are read from the
+      URL rather than held in state, so reload, bookmark and back all work.
 - [x] **F12 — `tokens.ts`** — authoritative; `theme.css` and `data.tsx` become
       mirrors, and the `data.tsx` re-exports die as screens are ported.
 
@@ -422,14 +426,14 @@ Doc 3 §5 (quality gates). A screen is not checked off until:
 | Section | Done | Total |
 |---|---|---|
 | Prerequisites (§2) | 0 | 6 |
-| UI foundation — Phase 3 (§3) | **11** | 12 |
+| UI foundation — Phase 3 (§3) | **12** | **12 ✅** |
 | New screens, backend ready (§4) | 0 | 11 |
 | New screens, blocked (§5) | 0 | 10 |
 | Main's unwired screens (§6) | 0 | 22 (11 ready, 11 blocked) |
 | Figma batches undesigned (§7) | 0 | 3 batches / ~25 screens |
 | Non-screen assets (§8) | 0 | 6 |
 | Overlap decisions (§9) | 0 | 80 |
-| **Total** | **11 done** | **67 items + 80 screen decisions** |
+| **Total** | **12 done** | **67 items + 80 screen decisions** |
 
 ---
 
@@ -437,7 +441,8 @@ Doc 3 §5 (quality gates). A screen is not checked off until:
 
 | Date | Item | Note |
 |---|---|---|
-| 2026-08-16 | **§3 foundation — 11 of 12 landed** | `lib/tokens.ts`, `lib/tier.ts`, `lib/connection.ts` + 8 components. Web typecheck + build clean; server typecheck clean, 314 tests passing. Bundle 1,211 → 1,242 kB (TanStack Query + 8 components). **F11 (nav rebuild) not started.** |
+| 2026-08-16 | **F11 — navigation rebuilt; §3 foundation COMPLETE** | One route table replaces the `Screen` union, `SCREEN_ROLE_MAP`, `DOOR_LOCK_SCREENS`, the `NAV` tree and the 90-branch switch. −445 lines. Verified: 83 routes, no duplicate paths, every sidebar reference resolves, 80 screens all still reachable. Typecheck + build clean; dev server transforms clean. **Found and fixed a live bug**: the Management dashboard's Housekeeping KPI tile navigated to `/` because its screen id had no entry in the second lookup table. |
+| 2026-08-16 | §3 foundation — first 11 | `lib/tokens.ts`, `lib/tier.ts`, `lib/connection.ts` + 8 components. Web typecheck + build clean; server typecheck clean, 314 tests passing. Bundle 1,211 → 1,242 kB (TanStack Query + 8 components). **F11 (nav rebuild) not started.** |
 | 2026-08-16 | **Removed a demo prop from the shell** | The header sync pill toggled a local boolean and toasted *"5 pending items pushed"* when nothing had synced; the offline banner it drove promised queued changes that do not exist. Both replaced with real signals (`GET /sync/status`, and a request actually failing to reach the server). Same defect class as Phase 0.1's no-op controls, still live in `App.tsx`. |
 | 2026-08-16 | Backend: `/auth/me` now returns permissions | Two lines, reusing the existing `permissionsForRole()`. Without it `<RoleGate>` could only gate by role name, which drifts as soon as a manager edits a role via HR-03. |
 | 2026-08-16 | **Tracker rebuilt after I destroyed it** | A section-renumbering script's split regex failed and truncated the file to its header. It was untracked, so there was no git copy. Rebuilt from the scratchpad source data. **Committing this file is the fix**, and no more regex surgery on it. |

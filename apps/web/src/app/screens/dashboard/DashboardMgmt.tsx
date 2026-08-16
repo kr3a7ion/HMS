@@ -79,7 +79,6 @@ function pctDelta(today: number, yesterday: number): { text: string; positive: b
 // Export PDF and New Reservation were purely decorative in the original
 // mock (no onClick at all); both are now real.
 
-const REAL_DASHBOARD_TARGETS: Record<string, string> = { "work-orders": "/maintenance/work-orders", "pos-terminal": "/restaurant/pos" };
 const ROOM_STATUS_COLORS: Record<string, string> = {
   Occupied: ORANGE, Available: SUCCESS, Cleaning: WARNING, Reserved: TEAL, Maintenance: ERROR, "Out of Service": "#6B7280",
 };
@@ -88,7 +87,7 @@ const ACTIVITY_COLOR: Record<ActivityEvent["type"], { bg: string; text: string }
   charge: { bg: "#ECFDF5", text: TEAL }, maintenance: { bg: "#FFF7ED", text: "#F97316" }, restaurant: { bg: "#EFF6FF", text: PRIMARY },
 };
 
-export function DashboardMgmt({ add, nav }: { add: AddToast; nav?: (s: string, label: string) => void }) {
+export function DashboardMgmt({ add }: { add: AddToast }) {
   const navigate = useNavigate();
   const [data, setData] = useState<ManagementOverview | null>(null);
   const [loading, setLoading] = useState(true);
@@ -109,7 +108,14 @@ export function DashboardMgmt({ add, nav }: { add: AddToast; nav?: (s: string, l
   const statusColor: Record<string, string> = { success: SUCCESS, warning: WARNING, error: ERROR };
   const statusBg: Record<string, string> = { success: "#F0FDF4", warning: "#FFFBEB", error: "#FEF2F2" };
   const kpiIcon: Record<string, React.ElementType> = { Housekeeping: BedDouble, Maintenance: Wrench, Restaurant: UtensilsCrossed };
-  const kpiTarget: Record<string, string> = { Housekeeping: "hk-board", Maintenance: "work-orders", Restaurant: "pos-terminal" };
+  // Paths, not screen ids. The old version mapped to ids and then looked
+  // them up in a second table that only covered two of the three, so the
+  // Housekeeping tile silently navigated to "/" instead of the board.
+  const kpiTarget: Record<string, string> = {
+    Housekeeping: "/housekeeping/board",
+    Maintenance: "/maintenance/work-orders",
+    Restaurant: "/restaurant/pos",
+  };
 
   return (
     <div>
@@ -168,7 +174,7 @@ export function DashboardMgmt({ add, nav }: { add: AddToast; nav?: (s: string, l
           <div className="col-span-2"><h3 className="text-sm font-semibold mb-3" style={{ color: TEXT }}>Department KPIs</h3></div>
           {data.departmentKpis.map((k, i) => {
             const sc = statusColor[k.status]; const sb = statusBg[k.status]; const Icon = kpiIcon[k.department] ?? Activity; const target = kpiTarget[k.department];
-            const onClick = () => { if (!target) return; if (nav) nav(target, k.department); else navigate(REAL_DASHBOARD_TARGETS[target] ?? "/"); };
+            const onClick = () => { if (target) navigate(target); };
             return <div key={`${k.department}-${k.metric}-${i}`} onClick={onClick} className="bg-white rounded-xl p-4 border flex items-start gap-3 cursor-pointer hover:shadow-sm transition-shadow" style={{ borderColor: BORDER }}><div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: sb }}><Icon size={18} style={{ color: sc }} /></div><div><div className="text-xs font-medium" style={{ color: MUTED }}>{k.department}</div><div className="text-sm font-semibold" style={{ color: TEXT }}>{k.metric}</div><div className="text-lg font-bold" style={{ color: sc }}>{k.value}</div></div></div>;
           })}
         </div>
@@ -176,7 +182,7 @@ export function DashboardMgmt({ add, nav }: { add: AddToast; nav?: (s: string, l
       <div className="bg-white rounded-xl border overflow-hidden" style={{ borderColor: BORDER }}>
         <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: "#F1F5F9" }}>
           <h3 className="text-sm font-semibold" style={{ color: TEXT }}>Recent Activity</h3>
-          {nav && <BtnO label="View All" onClick={() => nav("in-house-guests", "In-House Guests")} />}
+          <BtnO label="View All" onClick={() => navigate("/front-desk/in-house")} />
         </div>
         {data.recentActivity.length === 0 ? <EmptyState icon={ClipboardList} message="No activity in the last 48 hours." /> : (
           <table className="w-full"><thead><tr style={{ backgroundColor: "#F8FAFC" }}>{["Ref ID", "Guest / Actor", "Room", "Action", "Time"].map(h => <th key={h} className="px-5 py-2.5 text-left text-xs font-semibold uppercase tracking-wider" style={{ color: MUTED }}>{h}</th>)}</tr></thead>

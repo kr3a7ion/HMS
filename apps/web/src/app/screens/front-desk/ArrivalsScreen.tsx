@@ -57,7 +57,8 @@ import {
   Badge, EmptyState, ToastC, LiveClock, SyncPill, StatCard, PageHeader, BtnP, BtnO, Inp, Sel, PlaceholderScreen,
 } from "../../Screens";
 
-export function ArrivalsScreen({ add, nav }: { add: (t: Omit<Toast, "id">) => void; nav?: (s: string, label: string) => void }) {
+export function ArrivalsScreen({ add }: { add: (t: Omit<Toast, "id">) => void }) {
+  const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState("All");
   const filtered = ARRIVALS_DATA.filter(a => {
@@ -69,7 +70,7 @@ export function ArrivalsScreen({ add, nav }: { add: (t: Omit<Toast, "id">) => vo
   });
   return (
     <div>
-      <PageHeader title="Arrivals List" sub={`${filtered.length} of ${ARRIVALS_DATA.length} arrivals today · 24 Jun 2025`} actions={<><BtnO label="Print List" icon={FileText} /><BtnP label="Quick Check-In" icon={KeyRound} onClick={() => nav && nav("check-in", "Check-In")} /></>} />
+      <PageHeader title="Arrivals List" sub={`${filtered.length} of ${ARRIVALS_DATA.length} arrivals today · 24 Jun 2025`} actions={<><BtnO label="Print List" icon={FileText} /><BtnP label="Quick Check-In" icon={KeyRound} onClick={() => navigate("/front-desk/check-in")} /></>} />
       <div className="bg-white rounded-2xl border overflow-hidden" style={{ borderColor: BORDER }}>
         <div className="flex items-center gap-3 px-5 py-3.5 border-b flex-wrap" style={{ backgroundColor: "#F8FAFC", borderColor: BORDER }}>
           <div className="relative"><Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: SUBTLE }} /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search guest or reservation…" className="pl-7 pr-3 py-1.5 text-xs rounded-xl border bg-white outline-none w-52" style={{ borderColor: BORDER }} /></div>
@@ -94,7 +95,7 @@ export function ArrivalsScreen({ add, nav }: { add: (t: Omit<Toast, "id">) => vo
               <td className="px-5 py-3 text-sm" style={{ color: MUTED }}>{a.nights}n</td>
               <td className="px-5 py-3">{a.assigned ? <span className="flex items-center gap-1 text-xs" style={{ color: SUCCESS }}><CheckCircle2 size={13} />Assigned</span> : <span className="text-xs font-medium" style={{ color: WARNING }}>Unassigned</span>}</td>
               <td className="px-5 py-3 text-xs" style={{ color: MUTED, maxWidth: 160 }}><span className="line-clamp-1">{a.requests}</span></td>
-              <td className="px-5 py-3"><div className="flex gap-1"><button onClick={() => nav ? nav("check-in", "Check-In") : add({ type: "info", title: "Not available yet — this screen is not wired to check-in", body: a.guest })} className="text-xs px-2.5 py-1.5 rounded-lg border font-medium" style={{ color: PRIMARY, borderColor: `${PRIMARY}30` }}>Check In</button><button className="w-7 h-7 rounded flex items-center justify-center hover:bg-[#F1F5F9]" style={{ color: SUBTLE }}><MoreHorizontal size={13} /></button></div></td>
+              <td className="px-5 py-3"><div className="flex gap-1"><button onClick={() => navigate("/front-desk/check-in")} className="text-xs px-2.5 py-1.5 rounded-lg border font-medium" style={{ color: PRIMARY, borderColor: `${PRIMARY}30` }}>Check In</button><button className="w-7 h-7 rounded flex items-center justify-center hover:bg-[#F1F5F9]" style={{ color: SUBTLE }}><MoreHorizontal size={13} /></button></div></td>
             </tr>
           ))}</tbody>
         </table>

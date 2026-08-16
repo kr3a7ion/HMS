@@ -57,7 +57,8 @@ import {
   Badge, EmptyState, ToastC, LiveClock, SyncPill, StatCard, PageHeader, BtnP, BtnO, Inp, Sel, PlaceholderScreen,
 } from "../../Screens";
 
-export function ReservationSearch({ add, nav }: { add: (t: Omit<Toast, "id">) => void; nav?: (s: string, label: string) => void }) {
+export function ReservationSearch({ add }: { add: (t: Omit<Toast, "id">) => void }) {
+  const navigate = useNavigate();
   const [q, setQ] = useState("");
   const filtered = q ? ALL_RES.filter(r => r.guest.toLowerCase().includes(q.toLowerCase()) || r.id.toLowerCase().includes(q)) : ALL_RES;
   return (
@@ -80,7 +81,7 @@ export function ReservationSearch({ add, nav }: { add: (t: Omit<Toast, "id">) =>
             <td className="px-5 py-3 text-xs" style={{ color: MUTED }}>{r.checkout}</td>
             <td className="px-5 py-3 text-sm" style={{ color: MUTED }}>{r.nights}n</td>
             <td className="px-5 py-3"><Badge label={r.status} colors={resStC[r.status] ?? { bg: "#F1F5F9", text: "#374151" }} /></td>
-            <td className="px-5 py-3"><div className="flex gap-1"><button onClick={() => nav && nav("reservation-detail", r.id)} className="text-xs px-2.5 py-1.5 rounded-lg border" style={{ color: TEAL, borderColor: `${TEAL}30` }}>View</button>{r.status === "Confirmed" && <button onClick={() => nav ? nav("check-in", "Check-In") : add({ type: "info", title: "Not available yet — this screen is not wired to check-in", body: r.guest })} className="text-xs px-2.5 py-1.5 rounded-lg border" style={{ color: PRIMARY, borderColor: `${PRIMARY}30` }}>Check In</button>}</div></td>
+            <td className="px-5 py-3"><div className="flex gap-1"><button onClick={() => navigate(`/reservations/${r.id}`)} className="text-xs px-2.5 py-1.5 rounded-lg border" style={{ color: TEAL, borderColor: `${TEAL}30` }}>View</button>{r.status === "Confirmed" && <button onClick={() => navigate("/front-desk/check-in")} className="text-xs px-2.5 py-1.5 rounded-lg border" style={{ color: PRIMARY, borderColor: `${PRIMARY}30` }}>Check In</button>}</div></td>
           </tr>)}</tbody>
         </table>
         {filtered.length === 0 && <EmptyState icon={Search} message="No reservations match your search." />}

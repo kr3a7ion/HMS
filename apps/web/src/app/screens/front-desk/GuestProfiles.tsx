@@ -57,7 +57,8 @@ import {
   Badge, EmptyState, ToastC, LiveClock, SyncPill, StatCard, PageHeader, BtnP, BtnO, Inp, Sel, PlaceholderScreen,
 } from "../../Screens";
 
-export function GuestProfiles({ add, nav }: { add: (t: Omit<Toast, "id">) => void; nav?: (s: string, label: string) => void }) {
+export function GuestProfiles({ add }: { add: (t: Omit<Toast, "id">) => void }) {
+  const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [filterTab, setFilterTab] = useState("All");
   const ALL_GUESTS = [
@@ -101,7 +102,7 @@ export function GuestProfiles({ add, nav }: { add: (t: Omit<Toast, "id">) => voi
             {filtered.length === 0 ? (
               <tr><td colSpan={7}><EmptyState icon={Users} message={filterTab === "Blacklisted" ? "No blacklisted guests on record." : `No guests match "${search || filterTab}"`} /></td></tr>
             ) : filtered.map((g, i) => (
-              <tr key={g.id} onClick={() => nav && nav("guest-profile-detail", g.name)} className="border-t hover:bg-[#F8FAFC] cursor-pointer transition-colors" style={{ borderColor: "#F1F5F9", backgroundColor: i % 2 === 0 ? "white" : "#FAFBFD" }}>
+              <tr key={g.id} onClick={() => navigate(`/front-desk/guests/${g.id}`)} className="border-t hover:bg-[#F8FAFC] cursor-pointer transition-colors" style={{ borderColor: "#F1F5F9", backgroundColor: i % 2 === 0 ? "white" : "#FAFBFD" }}>
                 <td className="px-5 py-3.5">
                   <div className="flex items-center gap-3">
                     <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold text-white" style={{ backgroundColor: g.vip ? ORANGE : PRIMARY }}>{g.name.split(" ").map(n => n[0]).join("").slice(0, 2)}</div>
@@ -118,8 +119,10 @@ export function GuestProfiles({ add, nav }: { add: (t: Omit<Toast, "id">) => voi
                 <td className="px-5 py-3.5">{g.tag && <span className="text-xs px-2.5 py-0.5 rounded-full font-semibold" style={{ backgroundColor: "#EFF6FF", color: PRIMARY }}>{g.tag}</span>}</td>
                 <td className="px-5 py-3.5" onClick={e => e.stopPropagation()}>
                   <div className="flex gap-1">
-                    <button onClick={() => nav && nav("guest-profile-detail", g.name)} className="text-xs px-2.5 py-1.5 rounded-xl border" style={{ color: TEAL, borderColor: `${TEAL}30` }}>View</button>
-                    <button onClick={() => nav && nav("new-reservation", g.name)} className="text-xs px-2.5 py-1.5 rounded-xl border" style={{ color: PRIMARY, borderColor: `${PRIMARY}30` }}>Reserve</button>
+                    <button onClick={() => navigate(`/front-desk/guests/${g.id}`)} className="text-xs px-2.5 py-1.5 rounded-xl border" style={{ color: TEAL, borderColor: `${TEAL}30` }}>View</button>
+                    {/* Carries the guest through, so the booking form opens
+                        pre-filled instead of asking for details we have. */}
+                    <button onClick={() => navigate(`/reservations/new?guestId=${g.id}`)} className="text-xs px-2.5 py-1.5 rounded-xl border" style={{ color: PRIMARY, borderColor: `${PRIMARY}30` }}>Reserve</button>
                   </div>
                 </td>
               </tr>

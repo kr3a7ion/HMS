@@ -108,7 +108,7 @@ const SWITCHABLE_DEPARTMENTS: Array<{ value: string; label: string }> = [
   { value: "MX", label: "Maintenance" }, { value: "FIN", label: "Finance" }, { value: "RT", label: "Restaurant" },
 ];
 
-export function DashboardRole({ role, nav }: { role: Role; nav?: (s: string, label: string) => void }) {
+export function DashboardRole({ role }: { role: Role }) {
   const navigate = useNavigate();
   const [data, setData] = useState<RoleDashboard | null>(null);
   const [arrivals, setArrivals] = useState<ReservationListItem[]>([]);

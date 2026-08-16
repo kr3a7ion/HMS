@@ -64,7 +64,8 @@ const DEPARTURES_DATA = [
   { room: "118", guest: "Tunde Lawal", checkout: "10:00", balance: 18500, lateFlag: false, nights: 1, av: "TL" },
 ];
 
-export function DeparturesScreen({ add, nav }: { add: (t: Omit<Toast, "id">) => void; nav?: (s: string, label: string) => void }) {
+export function DeparturesScreen({ add }: { add: (t: Omit<Toast, "id">) => void }) {
+  const navigate = useNavigate();
   return (
     <div>
       <PageHeader title="Departures List" sub={`${DEPARTURES_DATA.length} expected check-outs today · 24 Jun 2025`} actions={<><BtnO label="Print List" icon={FileText} /><BtnP label="Quick Check-Out" icon={ArrowRight} /></>} />
@@ -78,7 +79,7 @@ export function DeparturesScreen({ add, nav }: { add: (t: Omit<Toast, "id">) => 
               <td className="px-5 py-3 text-sm font-mono" style={{ color: TEXT, fontFamily: mono }}>{d.checkout}</td>
               <td className="px-5 py-3">{d.balance > 0 ? <span className="text-sm font-bold" style={{ color: ERROR }}>₦{d.balance.toLocaleString()}</span> : <span className="flex items-center gap-1 text-xs" style={{ color: SUCCESS }}><CheckCircle2 size={13} />Settled</span>}</td>
               <td className="px-5 py-3">{d.lateFlag ? <Badge label="Late Checkout" colors={{ bg: "#FEF3C7", text: "#92400E" }} /> : <span style={{ color: SUBTLE }}>—</span>}</td>
-              <td className="px-5 py-3"><div className="flex gap-1"><button onClick={() => nav ? nav("check-out", "Check-Out") : add({ type: "info", title: "Check-out initiated", body: `Room ${d.room} · ${d.guest}` })} className="text-xs px-2.5 py-1.5 rounded-lg border font-medium" style={{ color: TEAL, borderColor: `${TEAL}30` }}>Check Out</button><button className="text-xs px-2.5 py-1.5 rounded-lg border" style={{ color: MUTED, borderColor: BORDER }}>Extend</button></div></td>
+              <td className="px-5 py-3"><div className="flex gap-1"><button onClick={() => navigate("/front-desk/check-out")} className="text-xs px-2.5 py-1.5 rounded-lg border font-medium" style={{ color: TEAL, borderColor: `${TEAL}30` }}>Check Out</button><button className="text-xs px-2.5 py-1.5 rounded-lg border" style={{ color: MUTED, borderColor: BORDER }}>Extend</button></div></td>
             </tr>
           ))}</tbody>
         </table>

@@ -64,7 +64,8 @@ import {
 // revokeCredentialsForRoom in server/src/services/locks/access.ts).
 interface RoomGroup { roomId: string; roomNumber: string; guestName: string; reservationId: string; validTo: string; cards: AccessCredential[]; pin: AccessCredential | null }
 
-export function RoomAccessMgmt({ add, nav }: { add: (t: Omit<Toast, "id">) => void; nav?: (s: string, label: string) => void }) {
+export function RoomAccessMgmt({ add }: { add: (t: Omit<Toast, "id">) => void }) {
+  const navigate = useNavigate();
   const [creds, setCreds] = useState<AccessCredential[]>([]);
   const [loading, setLoading] = useState(true);
   const [revokeRoom, setRevokeRoom] = useState<string | null>(null);
@@ -121,7 +122,7 @@ export function RoomAccessMgmt({ add, nav }: { add: (t: Omit<Toast, "id">) => vo
 
   return (
     <div>
-      <PageHeader title="Room Access Management" sub="All active access credentials across the property · Door Lock" actions={nav && <BtnO label="Key Card Log" icon={ClipboardList} onClick={() => nav("key-card-log", "Key Card Log")} />} />
+      <PageHeader title="Room Access Management" sub="All active access credentials across the property · Door Lock" actions={<BtnO label="Key Card Log" icon={ClipboardList} onClick={() => navigate("/front-desk/key-card-log")} />} />
       {loading ? <div className="p-5"><div className="h-40 rounded-xl animate-pulse" style={{ backgroundColor: "#F1F5F9" }} /></div> : groups.length === 0 ? (
         <div className="bg-white rounded-xl border" style={{ borderColor: BORDER }}><EmptyState icon={Lock} message="No active access credentials right now." /></div>
       ) : (

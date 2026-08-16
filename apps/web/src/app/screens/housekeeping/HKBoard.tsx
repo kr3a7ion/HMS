@@ -67,7 +67,8 @@ const HK_BADGE_COLORS: Record<string, { bg: string; text: string }> = {
   clean: { bg: "#FEF9C3", text: "#713F12" }, inspected: { bg: "#DCFCE7", text: "#166534" },
 };
 
-export function HKBoard({ add, nav }: { add: AddToast; nav?: (s: string, label: string) => void }) {
+export function HKBoard({ add }: { add: AddToast }) {
+  const navigate = useNavigate();
   const [filter, setFilter] = useState<"All" | HkRoom["housekeepingStatus"]>("All");
   const [rooms, setRooms] = useState<HkRoom[]>([]);
   const [attendants, setAttendants] = useState<StaffUser[]>([]);
@@ -119,7 +120,7 @@ export function HKBoard({ add, nav }: { add: AddToast; nav?: (s: string, label: 
   return (
     <div>
       <PageHeader title="Housekeeping Board" sub={error || "Master room status — click Update to cycle status for real"}
-        actions={<BtnO label="Schedule" icon={CalendarDays} onClick={() => nav && nav("hk-schedule", "Schedule")} />} />
+        actions={<BtnO label="Schedule" icon={CalendarDays} onClick={() => navigate("/housekeeping/schedule")} />} />
       <div className="grid grid-cols-4 gap-4 mb-5">
         {[{ l: "To Clean", v: counts.dirty, c: ERROR, bg: "#FEF2F2" }, { l: "In Progress", v: counts.in_progress, c: ORANGE, bg: "#FFF7ED" }, { l: "Clean", v: counts.clean, c: "#F59E0B", bg: "#FFFBEB" }, { l: "Inspected / Ready", v: counts.inspected, c: SUCCESS, bg: "#F0FDF4" }].map(s => (
           <div key={s.l} className="rounded-2xl p-4 border text-center transition-all" style={{ backgroundColor: s.bg, borderColor: `${s.c}25`, boxShadow: "0 2px 8px rgba(13,27,46,0.05)" }}>

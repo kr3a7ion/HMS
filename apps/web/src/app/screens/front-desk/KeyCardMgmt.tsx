@@ -74,7 +74,8 @@ import {
 // room's cards a room-level click should target.
 interface RoomCardGroup { roomId: string; roomNumber: string; guestName: string; reservationId: string; count: number; lastIssued: string; lastIssuedBy: string }
 
-export function KeyCardMgmt({ add, nav }: { add: (t: Omit<Toast, "id">) => void; nav?: (s: string, label: string) => void }) {
+export function KeyCardMgmt({ add }: { add: (t: Omit<Toast, "id">) => void }) {
+  const navigate = useNavigate();
   const [creds, setCreds] = useState<AccessCredential[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyRoom, setBusyRoom] = useState<string | null>(null);
@@ -125,8 +126,8 @@ export function KeyCardMgmt({ add, nav }: { add: (t: Omit<Toast, "id">) => void;
                 <td className="px-5 py-3 text-xs" style={{ color: MUTED }}>{g.lastIssuedBy}</td>
                 <td className="px-5 py-3"><div className="flex gap-1">
                   <button onClick={() => encodeNew(g)} disabled={busyRoom === g.roomId} className="text-xs px-2.5 py-1.5 rounded-lg border font-medium disabled:opacity-40" style={{ color: PRIMARY, borderColor: `${PRIMARY}30` }}>Encode New</button>
-                  <button onClick={() => nav && nav("room-access", "Room Access Management")} className="text-xs px-2.5 py-1.5 rounded-lg border" style={{ color: ERROR, borderColor: `${ERROR}20` }}>Deactivate…</button>
-                  <button onClick={() => nav && nav("key-card-log", "Key Card Log")} className="text-xs px-2.5 py-1.5 rounded-lg border" style={{ color: MUTED, borderColor: BORDER }}>History</button>
+                  <button onClick={() => navigate("/front-desk/room-access")} className="text-xs px-2.5 py-1.5 rounded-lg border" style={{ color: ERROR, borderColor: `${ERROR}20` }}>Deactivate…</button>
+                  <button onClick={() => navigate("/front-desk/key-card-log")} className="text-xs px-2.5 py-1.5 rounded-lg border" style={{ color: MUTED, borderColor: BORDER }}>History</button>
                 </div></td>
               </tr>
             ))}</tbody>

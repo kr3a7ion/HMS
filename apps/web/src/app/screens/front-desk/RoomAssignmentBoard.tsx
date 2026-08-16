@@ -57,7 +57,7 @@ import {
   Badge, EmptyState, ToastC, LiveClock, SyncPill, StatCard, PageHeader, BtnP, BtnO, Inp, Sel, PlaceholderScreen,
 } from "../../Screens";
 
-export function RoomAssignmentBoard({ add, nav }: { add: (t: Omit<Toast, "id">) => void; nav?: (s: string, label: string) => void }) {
+export function RoomAssignmentBoard({ add }: { add: (t: Omit<Toast, "id">) => void }) {
   const unassigned = ARRIVALS_DATA.filter(a => !a.assigned);
   const available = ROOMS.filter(r => r.status === "Available");
   const [sel, setSel] = useState<string | null>(null);
