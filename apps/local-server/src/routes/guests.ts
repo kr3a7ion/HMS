@@ -6,6 +6,7 @@ import { db } from "../db/client.js";
 import { guests, reservations, rooms } from "../db/schema.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../auth/middleware.js";
 import { logAudit } from "../services/audit.js";
+import { folioSummary } from "../services/folio.js";
 
 const router = Router();
 
@@ -34,7 +35,41 @@ router.get("/", requireAuth, (req: AuthedRequest, res) => {
       )).limit(limit).all()
     : db.select().from(guests).where(eq(guests.branchId, branchId)).limit(limit).all();
 
-  res.json(rows);
+  // FD-06 Guest Profiles shows stay counts, last stay, current-stay flag and
+  // outstanding balance, and two of its filter tabs ("Active Stay", "Has
+  // Balance") are meaningless without them.
+  //
+  // OPT-IN, because the same endpoint backs New Reservation's type-ahead
+  // guest picker, which fires on every keystroke and needs none of this. A
+  // picker paying for folio summaries it will not render is how a search box
+  // starts feeling slow.
+  if (req.query.withStats !== "true") return res.json(rows);
+
+  // One pass over the branch's reservations rather than a query per guest.
+  const byGuest = new Map<string, (typeof reservations.$inferSelect)[]>();
+  for (const r of db.select().from(reservations).where(eq(reservations.branchId, branchId)).all()) {
+    const list = byGuest.get(r.guestId);
+    if (list) list.push(r); else byGuest.set(r.guestId, [r]);
+  }
+
+  res.json(rows.map(g => {
+    const stays = (byGuest.get(g.id) ?? [])
+      .filter(r => r.status === "checked_in" || r.status === "checked_out")
+      .sort((a, b) => b.checkOutDate.getTime() - a.checkOutDate.getTime());
+
+    // Folio summaries are the expensive part, so they run only over stays
+    // that can still carry a balance -- a cancelled booking never had one.
+    let balanceKobo = 0;
+    for (const stay of stays) balanceKobo += folioSummary(stay.id).balanceKobo;
+
+    return {
+      ...g,
+      totalStays: stays.length,
+      lastStayAt: stays[0] ? stays[0].checkOutDate.toISOString() : null,
+      activeStay: stays.some(r => r.status === "checked_in"),
+      balanceKobo,
+    };
+  }));
 });
 
 // FD-06 Guest Profile Detail. Added for the UI adoption: the screen existed
@@ -76,12 +111,24 @@ router.get("/:id", requireAuth, (req: AuthedRequest, res) => {
   // is not a stay.
   const completed = stays.filter(s => s.status === "checked_out" || s.status === "checked_in");
 
+  // LIFETIME VALUE IS WHAT THEY WERE CHARGED, not the nightly rate.
+  //
+  // The first version summed `rateKobo`, which is the rate PER NIGHT. A guest
+  // with two three-night stays at 45,000 and 38,000 came back as 83,000 --
+  // roughly a third of the truth, and it would have been read as "this
+  // person is worth 83,000 to us" when deciding whether to comp an upgrade.
+  //
+  // The folio is the only thing that knows what was actually charged: room
+  // nights, extras, tax, and any adjustment made along the way.
+  const lifetimeValueKobo = completed.reduce(
+    (sum, s) => sum + folioSummary(s.id).totalChargesKobo, 0);
+
   res.json({
     ...guest,
     stays,
     totalStays: completed.length,
     lastStayAt: completed[0]?.checkOutDate ?? null,
-    lifetimeValueKobo: completed.reduce((sum, s) => sum + s.rateKobo, 0),
+    lifetimeValueKobo,
   });
 });
 

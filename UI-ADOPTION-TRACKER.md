@@ -218,7 +218,7 @@ are unwired too.
 | ☐ | `CancellationRefund` | B9 ✅ | `/cancellation-preview`, `/cancel`, `/refunds` |
 | ☐ | `InvoiceReceipts` | B7 ✅ | `/invoices`, `/receipts` |
 | ☐ | `RateManagement` | B8 ✅ | `/rate-plans`, `/rate-calendar` |
-| ☐ | `GuestProfiles` / `GuestProfileDetail` | guests ⚠→✅ | **This row was WRONG: `GET /guests/:id` did not exist.** Added it (guest + stay history + totals), and `GET /guests` had a hardcoded `limit 20` that silently truncated the directory — now a parameter, default 20, cap 200. |
+| ☑ | `GuestProfiles` / `GuestProfileDetail` | guests ✅ | **done**. `GET /guests/:id` did not exist — the detail screen rendered one hardcoded guest regardless of which row you clicked. Added it, plus opt-in `?withStats=true` aggregates (stays, last stay, active, balance) the directory's columns and two of its tabs need. Preferences and Complaints tabs kept but state plainly they have no backing data. |
 
 **11 are blocked** on the same batches as §5:
 
@@ -429,11 +429,11 @@ Doc 3 §5 (quality gates). A screen is not checked off until:
 | UI foundation — Phase 3 (§3) | **12** | **12 ✅** |
 | New screens, backend ready (§4) | 0 | 11 |
 | New screens, blocked (§5) | 0 | 10 |
-| Main's unwired screens (§6) | **5** | 22 (11 ready, 11 blocked) |
+| Main's unwired screens (§6) | **7** | 22 (11 ready, 11 blocked) |
 | Figma batches undesigned (§7) | 0 | 3 batches / ~25 screens |
 | Non-screen assets (§8) | 0 | 6 |
 | Overlap decisions (§9) | 0 | 80 |
-| **Total** | **17 done** | **67 items + 80 screen decisions** |
+| **Total** | **19 done** | **67 items + 80 screen decisions** |
 
 ---
 
@@ -441,6 +441,7 @@ Doc 3 §5 (quality gates). A screen is not checked off until:
 
 | Date | Item | Note |
 |---|---|---|
+| 2026-08-16 | **Guest screens wired — and a money bug in my own endpoint** | `lifetimeValueKobo` summed `rateKobo`, which is the rate **per night**. A guest with two three-night stays came back as ₦83,000 instead of ₦320,335 — nearly 4× understated, and it is the number someone reads when deciding whether to comp an upgrade. Now sums folio charges, which is the only thing that knows what was actually billed. Cross-checked: ₦206,335 + ₦114,000 = ₦320,335. |
 | 2026-08-16 | **RoomAssignmentBoard wired** | Caught my own bad filter by checking real data: I required rooms to be clean, which showed **zero assignable rooms** because both free rooms were mid-clean. Backwards — a front desk assigns in the morning, precisely when rooms are dirty. Now every free room is offered with its housekeeping state shown rather than used to hide it. Also found the server returns `typeChanged` and `indicativeRateKobo` on assignment, which I was discarding; an upgrade's rate implication now reaches the clerk instead of surfacing at checkout. |
 | 2026-08-16 | **Regression I introduced, caught by running the app** | Replacing the fake sync pill was right; returning `null` when it could not read sync was not. `/sync/status` needs `admin:operations` — FD/HK/RT get a 403 — and even MGT gets `configured: false` on this install, so **the header pill had disappeared for every role**. Exactly the silent-UI-removal the standing rule forbids, committed by me two commits after writing that rule down. The pill now always shows connection state (needs no permission) and adds sync detail only where readable. |
 | 2026-08-16 | **ReservationSearch wired** | Filters moved into the URL, the first screen to use the `useSearchParams` gate from §10. Client param corrected: the server reads `roomNumber`, my type said `room` — it would have been silently ignored. Status values verified live against the server's snake_case (`status=checked_in` → exactly the 2 checked-in rows). |

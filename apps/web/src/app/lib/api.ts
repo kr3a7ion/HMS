@@ -173,11 +173,25 @@ export interface GuestDetail extends Guest {
   lifetimeValueKobo: number;
 }
 
+/**
+ * A guest row with the aggregates FD-06's directory needs. Only returned
+ * when `withStats` is set: the same endpoint backs New Reservation's
+ * type-ahead picker, which fires per keystroke and renders none of this.
+ */
+export interface GuestWithStats extends Guest {
+  totalStays: number;
+  lastStayAt: string | null;
+  activeStay: boolean;
+  balanceKobo: number;
+}
+
 export const guestsApi = {
   // `limit` defaults to 20 server-side (right for a type-ahead picker),
   // capped at 200. The directory screen asks for more explicitly.
   list: (params: { search?: string; limit?: number } = {}) =>
     api.get<Guest[]>(`/guests${qs(params)}`),
+  listWithStats: (params: { search?: string; limit?: number } = {}) =>
+    api.get<GuestWithStats[]>(`/guests${qs({ ...params, withStats: "true" })}`),
   search: (query: string) => api.get<Guest[]>(`/guests?search=${encodeURIComponent(query)}`),
   get: (id: string) => api.get<GuestDetail>(`/guests/${id}`),
   create: (guest: { firstName: string; lastName: string; email?: string; phone?: string }) =>
