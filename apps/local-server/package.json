@@ -23,7 +23,7 @@
     "openapi:lint": "redocly lint openapi.json"
   },
   "dependencies": {
-    "bcryptjs": "^2.4.3",
+    "bcryptjs": "^3.0.3",
     "better-sqlite3": "^11.3.0",
     "cookie-parser": "^1.4.6",
     "cors": "^2.8.5",
@@ -39,7 +39,7 @@
   },
   "devDependencies": {
     "@redocly/cli": "^2.40.0",
-    "@types/bcryptjs": "^2.4.6",
+    "@types/bcryptjs": "^3.0.0",
     "@types/better-sqlite3": "^7.6.11",
     "@types/cookie-parser": "^1.4.7",
     "@types/cors": "^2.8.17",
