@@ -59,7 +59,7 @@ jobs:
       # cleared by Batch B3.
       - run: npm run lint:invariants
       - run: npm run test:coverage
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: local-server-coverage
@@ -83,7 +83,7 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm run test:coverage
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: central-server-coverage
