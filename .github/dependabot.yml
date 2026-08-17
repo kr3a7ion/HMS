@@ -1,0 +1,40 @@
+# Backend Blueprint B0.1. Each app under apps/ is an independent npm package
+# with its own package-lock.json (this is not a real pnpm/npm workspace
+# despite pnpm-workspace.yaml existing -- npm per-package is the toolchain
+# that actually builds and ships), so each needs its own ecosystem entry.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /apps/web
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # One PR for the routine patch/minor churn keeps the review queue
+      # readable; majors still arrive individually because they need
+      # thinking about.
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: npm
+    directory: /apps/local-server
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: npm
+    directory: /apps/central-server
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

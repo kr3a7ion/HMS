@@ -25,8 +25,17 @@ const appSrc = fs.readFileSync(path.join(SRC, "app.ts"), "utf8");
 
 // 1. Real import map: local var name -> routes/<file>.ts
 const importMap = new Map();
-for (const m of appSrc.matchAll(/import (\w+) from "\.\/routes\/([\w-]+)\.js"/g)) {
-  importMap.set(m[1], m[2]);
+// Handles both `import r from "./routes/x.js"` and
+// `import r, { extraRouter } from "./routes/x.js"` -- folios.ts exports a
+// second router (the reversal report, mounted under /reports next to the
+// void logic it reports on), and the original regex silently skipped the
+// whole file because of the named-import clause.
+for (const m of appSrc.matchAll(/import (\w+)(?:\s*,\s*\{([^}]*)\})?\s* from "\.\/routes\/([\w-]+)\.js"/g)) {
+  const [, defaultName, namedList, file] = m;
+  importMap.set(defaultName, file);
+  for (const named of (namedList ?? "").split(",").map(s => s.trim()).filter(Boolean)) {
+    importMap.set(named, file);
+  }
 }
 
 // 2. Real mount table: URL prefix -> route file
@@ -34,6 +43,26 @@ const mounts = [];
 for (const m of appSrc.matchAll(/app\.use\("(\/[\w-]*)",\s*(\w+)\)/g)) {
   const file = importMap.get(m[2]);
   if (file) mounts.push({ prefix: m[1], file });
+  else if (!/express|cors|cookieParser|pinoHttp|requestIdMiddleware/.test(m[2])) {
+    // Loud, because the alternative is what actually happened once: a route
+    // file was silently absent from the spec for an entire batch because an
+    // import shape did not match the regex above.
+    console.warn(`WARNING: app.use("${m[1]}", ${m[2]}) does not resolve to a routes/*.ts file -- its endpoints will be MISSING from the spec.`);
+  }
+}
+
+// This generator maps ONE router per route file: it scans a file for every
+// `router.<method>(` and applies the mount prefix to all of them. Mounting
+// two routers from the same file therefore emits that file's paths under
+// both prefixes, which is how `/reports/{id}` briefly appeared as a
+// duplicate of `/folios/{id}`. Keep one router per file.
+const filesByPrefixCount = new Map();
+for (const { file } of mounts) filesByPrefixCount.set(file, (filesByPrefixCount.get(file) ?? 0) + 1);
+for (const [file, count] of filesByPrefixCount) {
+  if (count > 1) {
+    console.error(`ERROR: routes/${file}.ts is mounted at ${count} different prefixes. This generator assumes one router per file and would duplicate every path. Split the second router into its own file.`);
+    process.exit(1);
+  }
 }
 
 const TAG_LABEL = {

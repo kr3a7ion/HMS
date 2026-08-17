@@ -25,12 +25,26 @@ function hashKey(key: string): string {
   return crypto.createHash("sha256").update(key).digest("hex");
 }
 
+// Backend Blueprint B0.2. `!==` on the hex digest short-circuits at the
+// first differing character, so response time leaks how many leading
+// characters of a guessed key were correct -- enough to reconstruct a valid
+// sync key byte by byte over many requests. timingSafeEqual always compares
+// the full buffer. Both sides are SHA-256 hex digests, so lengths always
+// match here, but the length check stays because timingSafeEqual throws
+// (rather than returning false) on a length mismatch.
+function sameKeyHash(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, "utf8");
+  const bufB = Buffer.from(b, "utf8");
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
 function authenticateBranch(req: any, res: any): typeof branches.$inferSelect | null {
   const branchId = req.params.branchId ?? req.body.branchId;
   const syncKey = req.headers["x-branch-sync-key"];
   if (!branchId || typeof syncKey !== "string") { res.status(401).json({ error: "MISSING_SYNC_CREDENTIALS" }); return null; }
   const branch = db.select().from(branches).where(eq(branches.id, branchId)).get();
-  if (!branch || branch.syncKeyHash !== hashKey(syncKey)) { res.status(401).json({ error: "INVALID_SYNC_KEY" }); return null; }
+  if (!branch || !sameKeyHash(branch.syncKeyHash, hashKey(syncKey))) { res.status(401).json({ error: "INVALID_SYNC_KEY" }); return null; }
   return branch;
 }
 
@@ -47,6 +61,13 @@ const pushSchema = z.object({
   // branches are on which version"). Reported by the branch itself, same
   // "you push your own state" asymmetry as the KPI fields above.
   currentVersion: z.string().optional(),
+  // Backend Blueprint B1: the branch's applied DB schema version, so the
+  // Platform Owner can see which properties are behind on migrations.
+  // Declared here rather than left to z.object()'s strip-unknown-keys
+  // behaviour so the contract is explicit -- this file already carries the
+  // scar of a payload/schema mismatch that silently 400'd every push.
+  // Accepted and not yet persisted; B20 adds the column.
+  schemaVersion: z.number().int().optional(),
   // Must match server/src/services/updater/index.ts's real CheckResult.status
   // union exactly -- this rejected a genuine "not_configured" push and
   // silently downgraded every push into a 400 until caught by a live test.

@@ -1,0 +1,5 @@
+{
+  "generatedAt": "2026-07-30T22:44:30.443Z",
+  "note": "Per-file multiset of write-counts for handlers that skip db.transaction(). Cleared by Batch B3.",
+  "writeCountsByFile": {}
+}

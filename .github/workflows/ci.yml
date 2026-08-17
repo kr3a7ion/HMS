@@ -1,12 +1,14 @@
 name: CI
 
-# Typecheck + build + test every package on every push/PR (ROADMAP.md
-# "Cross-cutting" section). Three independent npm packages under apps/ (web,
-# local-server, central-server), each with its own package-lock.json --
-# matches how they're actually developed and built locally, not a monorepo
-# tool. web has no automated tests yet, so it stops at typecheck+build;
-# local-server and central-server each run their real node:test suites
-# (src/test/**/*.test.ts) after building.
+# Typecheck + build + test + audit every package on every push/PR
+# (ROADMAP.md "Cross-cutting", Backend Blueprint B0). Three independent npm
+# packages under apps/ (web, local-server, central-server), each with its
+# own package-lock.json -- matches how they're actually developed and built
+# locally, not a monorepo tool.
+#
+# web has no automated tests yet, so it stops at typecheck+build.
+# local-server and central-server run their real vitest suites plus a
+# coverage report (B0.7 establishes the baseline; no threshold gate yet).
 on:
   push:
     branches: [main]
@@ -29,6 +31,14 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run build
+      # B0.1. Now a real gate: the React 18 -> 19 upgrade closed the last
+      # outstanding advisory (react-router 7.13.0 sat in GHSA range
+      # 6.0.0-8.2.0, and the patched 8.3.0 peer-requires react >=19.2.7).
+      # web is on react 19.2.8 / react-router 8.3.0 / vite 6.4.3 and audits
+      # clean at 0 vulnerabilities, so there is no longer any reason to let
+      # a high advisory through here.
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
 
   local-server:
     runs-on: ubuntu-latest
@@ -44,7 +54,19 @@ jobs:
           cache-dependency-path: apps/local-server/package-lock.json
       - run: npm ci
       - run: npm run build
-      - run: npm test
+      # B0.8. Ratchets invariant 3: fails only on NEW multi-write handlers
+      # that skip db.transaction(). The existing 20 are baselined and get
+      # cleared by Batch B3.
+      - run: npm run lint:invariants
+      - run: npm run test:coverage
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: local-server-coverage
+          path: apps/local-server/coverage/
+          if-no-files-found: ignore
+      - run: npm audit --audit-level=high
+        continue-on-error: true
 
   central-server:
     runs-on: ubuntu-latest
@@ -60,4 +82,12 @@ jobs:
           cache-dependency-path: apps/central-server/package-lock.json
       - run: npm ci
       - run: npm run build
-      - run: npm test
+      - run: npm run test:coverage
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: central-server-coverage
+          path: apps/central-server/coverage/
+          if-no-files-found: ignore
+      - run: npm audit --audit-level=high
+        continue-on-error: true

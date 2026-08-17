@@ -125,7 +125,48 @@ writing new `bg`/`text` pairs inline.
   screen IDs where one exists (e.g. `FD-12`, `HK-04`, `MB-01`) — it's the
   fastest way to cross-reference spec to code.
 
-## 7. What not to do
+## 7. Figma ↔ code: direction of authority and the merge protocol
+
+Execution Plan Phase 0.4. This exists because the Figma file and the code have
+already diverged once: the navy/teal + Plus Jakarta Sans rebrand happened in
+code and was never carried back, so **Figma is the stale one**. Every future
+raw export will try to drag the repo back to the old zinc/sky palette and
+Inter — along with a re-collapse of the 80-file module structure into four
+monoliths, the loss of `SCREEN_ROLE_MAP`, the `ORG` role, real auth, and the
+API wiring on 58 screens.
+
+**Direction of authority — decide once, then hold it:**
+
+- **Code is canonical for design tokens.** Colours, type scale, spacing,
+  radii, shadows. Figma variables get updated to match `theme.css`; they never
+  flow the other way.
+- **Figma is canonical for new screen composition only.** New layouts come
+  from Figma and get hand-applied to `screens/<module>/` using code tokens.
+- **Never run a raw Figma Make export over the repo.** Exports are reference
+  material you read, not code you merge.
+
+**Merge protocol for any Figma work:**
+
+1. Export to a scratch directory — never onto a branch.
+2. Diff the export's screen components against the corresponding
+   `screens/<module>/*.tsx`.
+3. Port only *layout and composition* deltas by hand, substituting this
+   repo's tokens for the export's.
+4. Delete the export.
+
+**Four deltas from the original Figma export were removed deliberately and
+stay removed** — each is documented in a code comment at its site:
+
+| Removed | Where | Why it stays removed |
+|---|---|---|
+| PIN "Reveal" showing a plaintext PIN | `PINManagement.tsx` | Plaintext PINs are never stored; the `74**12` mask is the real model |
+| "Approve Leave" in the Attendance header | `AttendanceScreen.tsx` | Leave approval needs its own flow with an approver record |
+| "Shift" field on the staff overview | `StaffProfileDetail.tsx` | No shift/assignment model exists yet |
+| Dashboard "Export PDF" / "New Reservation" | `DashboardMgmt.tsx` | Decorative in the original — re-add only when export actually works |
+
+Restoring any of these from an export is a regression, not a recovery.
+
+## 8. What not to do
 
 - Don't add a screen or flow that isn't in the Blueprint's screen inventory
   without checking with the user first — the inventory is deliberately

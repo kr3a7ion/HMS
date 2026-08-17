@@ -5,7 +5,7 @@
 // real RFC 6238 TOTP codes generated via generateTotp(), not hand-typed
 // guesses -- so what's verified is the actual enrollment/verify logic, not
 // a stand-in for it.
-import { test, before, after } from "node:test";
+import { test, beforeAll as before, afterAll as after } from "vitest";
 import assert from "node:assert/strict";
 import http from "node:http";
 import os from "node:os";
