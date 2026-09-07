@@ -29,7 +29,7 @@
     "cors": "^2.8.5",
     "drizzle-orm": "^0.45.2",
     "express": "^4.21.0",
-    "express-rate-limit": "^8.6.2",
+    "express-rate-limit": "^8.7.0",
     "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.2",
     "nanoid": "^5.0.7",
@@ -38,7 +38,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@redocly/cli": "^2.40.0",
+    "@redocly/cli": "^2.51.1",
     "@types/bcryptjs": "^2.4.6",
     "@types/better-sqlite3": "^7.6.11",
     "@types/cookie-parser": "^1.4.7",
@@ -48,7 +48,7 @@
     "@types/node": "^22.7.4",
     "@vitest/coverage-v8": "^4.1.10",
     "drizzle-kit": "^0.31.10",
-    "tsx": "^4.19.1",
+    "tsx": "^4.23.13",
     "typescript": "^5.6.2",
     "vitest": "^4.1.10"
   }
